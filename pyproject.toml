@@ -1,0 +1,16 @@
+# Tool configuration only; the environment is defined in pixi.toml.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".pixi", "outputs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = ["real_data: needs the COCOA val file on /ptmp (skipped if absent)"]
+filterwarnings = ["ignore::SyntaxWarning"]
