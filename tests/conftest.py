@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from scimo_bench import datasets
 from scimo_bench.io import REPO_ROOT
 from scimo_bench.jobs import ENV_ALLOW, ENV_JOB
 from tests import synthetic
@@ -13,8 +12,6 @@ from tests import synthetic
 # the suite is small and runs where it is called, login nodes included (`pixi run test-job`
 # runs it as a job)
 os.environ.setdefault(ENV_ALLOW, "1")
-# unit tests look variables up in the COCOA registry (as a pflow run does)
-datasets.activate("scimo_bench.datasets.cocoa")
 
 JOB_VARS = (ENV_JOB, "SLURM_JOB_ID", ENV_ALLOW)
 MODELS_FILE = "models_file=tests/models.py"

@@ -17,7 +17,7 @@ import pandas as pd
 from hydra_zen import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from scimo_bench import cutflow, io, perf, plotter, predict, scorer, variables
+from scimo_bench import catalogue, cutflow, io, perf, plotter, predict, scorer
 from scimo_bench.schema import EVENT_ID, condition_hash, validate
 
 log = logging.getLogger("scimo_bench")
@@ -30,14 +30,19 @@ MODELS = "models.csv"
 PERF = "perf.csv"
 
 
-def task_metrics(cfg: DictConfig) -> list[scorer.Metric]:
-    """The task's metrics, instantiated (unknown variables are config errors)."""
-    metrics = instantiate(cfg.task.metrics)
+def dataset_catalogue(cfg: DictConfig) -> catalogue.Catalogue:
+    """The dataset's observables, comparisons and plots."""
+    return catalogue.load(cfg.dataset.module)
+
+
+def task_metrics(cfg: DictConfig, cat: catalogue.Catalogue) -> list[scorer.Metric]:
+    """The task's metrics, instantiated (unknown names are config errors)."""
+    metrics = list(instantiate(cfg.task.metrics))
     for m in metrics:
-        variables.get(m.variable)
+        cat.check_name(m.variable, f"metric {m.name}")
         if m.x:
-            variables.get(m.x)
-    return list(metrics)
+            cat.check_name(m.x, f"metric {m.name} x")
+    return metrics
 
 
 def plot_names(cfg: DictConfig) -> list[str]:
@@ -47,23 +52,37 @@ def plot_names(cfg: DictConfig) -> list[str]:
     return [n for n in dict.fromkeys(names) if n not in skip]
 
 
-def plot_objects(cfg: DictConfig) -> list:
-    """The plot objects to draw (catalogue specs instantiated; Pareto plot last)."""
-    specs = instantiate(cfg.plots.specs) if cfg.plots.get("specs") else {}
+def plot_objects(cfg: DictConfig, cat: catalogue.Catalogue) -> list:
+    """The plots to draw: the dataset's plot functions or generic ones; Pareto plot last."""
+    known = {**plotter.GENERIC_PLOTS, **cat.plots}
     objs = []
     for name in plot_names(cfg):
-        p = plotter.resolve(name, specs)
-        if p is None:
-            raise ValueError(f"plot '{name}': not a plot spec, registered plot or variable")
-        objs.append(p)
+        if name not in known:
+            raise ValueError(
+                f"plot '{name}' is not a plot of dataset {cfg.dataset.name}; known: {sorted(known)}"
+            )
+        objs.append(known[name])
     if cfg.plots.get("pareto") is not None:
         objs.append(instantiate(cfg.plots.pareto))
     return objs
 
 
-def plot_variables(plots: list) -> list[str]:
-    """Variables the distribution plots need (stored in per_event.parquet)."""
-    return [p.variable for p in plots if isinstance(p, plotter.Distribution)]
+def check_params(cfg: DictConfig, cat: catalogue.Catalogue) -> None:
+    """Task parameters must be keyword arguments of some comparison."""
+    unknown = set(cfg.task.get("params") or {}) - cat.params()
+    if unknown:
+        raise ValueError(
+            f"task.params {sorted(unknown)} are not parameters of any comparison of "
+            f"{cfg.dataset.name}; known: {sorted(cat.params())}"
+        )
+
+
+def required_fields(cfg: DictConfig) -> set[str]:
+    """Collections and fields the dataset requires from models."""
+    out = set(cfg.dataset.get("event_fields") or [])
+    for coll, fields in (cfg.dataset.get("collections") or {}).items():
+        out |= {coll, *fields}
+    return out
 
 
 def missing(cfg: DictConfig, msg: str, *args) -> None:
@@ -130,8 +149,8 @@ def read_models(cfg: DictConfig) -> tuple[dict, list[scorer.ModelInfo], list[dic
 
 def score(cfg: DictConfig, folder: Path) -> None:
     """Read truth and prediction files, cut, score; write report, rankings, cutflow."""
-    metrics = task_metrics(cfg)
-    plots = plot_objects(cfg)
+    cat = dataset_catalogue(cfg)
+    metrics = task_metrics(cfg, cat)
     steps = instantiate(cfg.cutflow.steps) if cfg.cutflow is not None else []
     cutflow.check(steps)
     ids = event_list(cfg)
@@ -140,22 +159,22 @@ def score(cfg: DictConfig, folder: Path) -> None:
     truth = read_truth(cfg, ids)
 
     preds, infos, model_rows = read_models(cfg)
-    collection = cfg.task.params.collection
+    collection = cfg.task.collection
     joined = io.join(truth, preds, collection)
     joined = cutflow.apply(joined, steps)
     log.info("scoring %d events, %d models", len(joined.event_ids), len(joined.models))
 
-    extra = list(cfg.task.get("variables") or []) + plot_variables(plots)
     result = scorer.score(
         joined,
         infos,
         metrics,
-        ctx_kwargs=OmegaConf.to_container(cfg.task.params),
+        cat,
+        params=OmegaConf.to_container(cfg.task.params),
+        required=required_fields(cfg),
         n_boot=int(cfg.output.bootstrap.n),
         level=float(cfg.output.bootstrap.level),
         seed=int(cfg.output.seed),
         task_version=int(cfg.task.version),
-        extra_variables=extra,
     )
     rankings = scorer.rank(
         result.report,
@@ -175,8 +194,9 @@ def score(cfg: DictConfig, folder: Path) -> None:
 
 def plot(cfg: DictConfig, folder: Path) -> None:
     """Draw the task's plots from the files of the run folder."""
-    metrics = {m.name: m for m in task_metrics(cfg)}
-    plots = plot_objects(cfg)
+    cat = dataset_catalogue(cfg)
+    metrics = {m.name: m for m in task_metrics(cfg, cat)}
+    plots = plot_objects(cfg, cat)
     report = pd.read_csv(folder / REPORT)
     rankings = pd.read_csv(folder / RANKINGS) if (folder / RANKINGS).exists() else None
     per_event = ak.from_parquet(folder / PER_EVENT) if (folder / PER_EVENT).exists() else None
@@ -195,6 +215,7 @@ def plot(cfg: DictConfig, folder: Path) -> None:
         models=models,
         labels=labels,
         metrics=metrics,
+        catalogue=cat,
         formats=list(cfg.output.formats),
         task=f"{cfg.task.name} v{cfg.task.version} · {cfg.dataset.name}",
         style=plotter.Style.from_cfg(OmegaConf.to_container(cfg.plots.style, resolve=True)),

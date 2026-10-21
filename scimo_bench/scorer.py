@@ -3,7 +3,8 @@
 Every statistic is computed with integer event weights: weight 1 for every event gives the
 point estimate (equal to the numpy reference), multinomial counts from one resample of the
 events give one bootstrap replica. All models share the same resamples (paired bootstrap).
-The scorer computes no physics; it calls `variables.get()`.
+The scorer computes no physics; it calls the dataset's observables and comparisons
+(`scimo_bench/catalogue.py`).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
 
-from scimo_bench import variables
+from scimo_bench.catalogue import Catalogue, Missing, call_comparison, missing_field
 from scimo_bench.io import Joined
 
 log = logging.getLogger(__name__)
@@ -92,7 +93,10 @@ def weighted_std(s: Sample, w: np.ndarray) -> float:
 
 
 class Metric:
-    """A statistic of one variable, optionally in bins of `x` (explicit edges)."""
+    """A statistic of one quantity, optionally in bins of `x` (explicit edges).
+
+    `variable` and `x` name a comparison (`jet_e_response`) or an observable with its side
+    (`truth.jet_pt`, `reco.particle_pt`)."""
 
     default_better: str | Mapping = "lower"
     location = False  # True: the value estimates the variable itself (its reference applies)
@@ -212,7 +216,7 @@ def better_key(better, values: np.ndarray) -> np.ndarray:
     raise ValueError(f"better must be lower|higher|{{closest_to: v}}, got {better!r}")
 
 
-# --- variables per model -------------------------------------------------------------------
+# --- values per model ----------------------------------------------------------------------
 
 
 @dataclass
@@ -225,36 +229,45 @@ class ModelInfo:
     reason: str = ""
 
 
-def needed_variables(metrics: list[Metric], extra: list[str] = ()) -> list[str]:
-    """Variables to evaluate: the metrics' variables and x, extras, their truth counterparts."""
-    names: list[str] = []
-    for n in [v for m in metrics for v in (m.variable, m.x) if v] + list(extra):
-        var = variables.get(n)
-        for name in (n, var.truth):
-            if name and name not in names:
-                names.append(name)
-    return names
+def compute(fn, args: tuple, who: str, name: str, required: set[str]):
+    """`fn(*args)`, or `Missing` if its input lacks a field: a warning if the field is one
+    the dataset requires from models (`required`), else (e.g. tracks, an input) silent."""
+    try:
+        return fn(*args)
+    except Exception as e:
+        field_name = missing_field(e)
+        if field_name is None:
+            raise
+        if field_name in required:
+            log.warning("%s: %s is missing (no field '%s')", who, name, field_name)
+        else:
+            log.debug("%s: %s not computed (no field '%s')", who, name, field_name)
+        return Missing(f"no field '{field_name}'")
 
 
-def evaluate(joined: Joined, names: list[str], ctx_kwargs: dict) -> dict[str, dict]:
-    """{model or 'truth': {variable: array | MissingInput}}."""
-    out: dict[str, dict] = {}
-    ctx = variables.Context.from_params(ctx_kwargs)
-    out[TRUTH] = {}
-    for n in names:
-        var = variables.get(n)
-        if not var.needs_pred:
-            out[TRUTH][n] = var(joined.truth, None, ctx=ctx)
+def evaluate(
+    joined: Joined, cat: Catalogue, params: Mapping, required: set[str] = frozenset()
+) -> dict[str, dict]:
+    """Every observable and comparison: {'truth': {observable: values}, model:
+    {'truth.<obs>' (truth rows of the model), 'reco.<obs>', <comparison>: values}};
+    a value that cannot be computed is a `Missing`."""
+    truth_vals = {
+        name: compute(fn, (joined.truth,), TRUTH, name, required)
+        for name, fn in cat.observables.items()
+    }
+    out: dict[str, dict] = {TRUTH: truth_vals}
     for model in joined.models:
-        ctx = variables.Context.from_params(ctx_kwargs)
-        truth, pred = joined.truth_rows(model), joined.preds[model]
-        out[model] = {}
-        for n in names:
-            try:
-                out[model][n] = variables.get(n)(truth, pred, ctx=ctx)
-            except variables.MissingInput as e:
-                log.warning("%s: variable %s is missing (%s)", model, n, e)
-                out[model][n] = e
+        rows = joined.rows[model]
+        truth, reco = joined.truth_rows(model), joined.preds[model]
+        vals: dict = {}
+        for name, fn in cat.observables.items():
+            tv = truth_vals[name]
+            vals[f"truth.{name}"] = tv if isinstance(tv, Missing) else tv[rows]
+            vals[f"reco.{name}"] = compute(fn, (reco,), model, name, required)
+        for name, fn in cat.comparisons.items():
+            args = (fn, truth, reco, params)
+            vals[name] = compute(call_comparison, args, model, name, required)
+        out[model] = vals
     return out
 
 
@@ -268,7 +281,7 @@ def flatten(values, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarra
 
 
 def samples_for(metric: Metric, vals: dict, rows: np.ndarray) -> list[Sample]:
-    """Overall sample, then one per bin. Raises MissingInput / ValueError."""
+    """Overall sample, then one per bin. Raises Missing / ValueError."""
     v = vals[metric.variable]
     if isinstance(v, Exception):
         raise v
@@ -298,7 +311,7 @@ def samples_for(metric: Metric, vals: dict, rows: np.ndarray) -> list[Sample]:
 
 @dataclass
 class ScoreResult:
-    """Report rows, per-variable values and the per-event table of one scoring."""
+    """Report rows, all values (`evaluate`) and the per-event table of one scoring."""
 
     report: pd.DataFrame
     values: dict[str, dict]
@@ -310,16 +323,17 @@ def score(
     joined: Joined,
     models: list[ModelInfo],
     metrics: list[Metric],
-    ctx_kwargs: dict,
+    cat: Catalogue,
+    params: Mapping | None = None,
+    required: set[str] = frozenset(),
     n_boot: int = 1000,
     level: float = 0.95,
     seed: int = 0,
     task_version: int = 1,
-    extra_variables: list[str] = (),
 ) -> ScoreResult:
-    """All metrics for all models, with paired bootstrap intervals."""
-    names = needed_variables(metrics, extra_variables)
-    vals = evaluate(joined, names, ctx_kwargs)
+    """All metrics for all models, with paired bootstrap intervals; `params` are the task
+    parameters for the comparisons, `required` the fields models must output."""
+    vals = evaluate(joined, cat, params or {}, required)
     n_events = len(joined.event_ids)
 
     # (model, metric) -> list of samples (overall + bins), or a status and reason
@@ -334,7 +348,7 @@ def score(
             try:
                 samples[key] = samples_for(m, vals[info.name], joined.rows[info.name])
                 status[key] = OK
-            except variables.MissingInput:
+            except Missing:
                 status[key] = MISSING
             except ValueError as e:
                 log.warning("%s / %s: %s", info.name, m.name, e)
@@ -390,7 +404,7 @@ def score(
                     )
                 )
     report = pd.DataFrame(records, columns=REPORT_COLUMNS)
-    return ScoreResult(report, vals, per_event_array(joined, vals, names))
+    return ScoreResult(report, vals, per_event_array(joined, vals, cat))
 
 
 def overall(report: pd.DataFrame) -> pd.DataFrame:
@@ -469,8 +483,9 @@ def _column(value, n: int):
     return value if isinstance(value, ak.Array) else ak.Array(np.asarray(value))
 
 
-def per_event_array(joined: Joined, vals: dict[str, dict], names: list[str]) -> ak.Array:
-    """One record per (model, row) — and per truth event under model 'truth'."""
+def per_event_array(joined: Joined, vals: dict[str, dict], cat: Catalogue) -> ak.Array:
+    """One record per (model, row) — and per truth event under model 'truth' — with every
+    observable (of that side) and comparison (models only) as a column."""
     parts = []
     n = len(joined.event_ids)
     blocks = [(TRUTH, joined.event_ids, np.zeros(n, dtype=np.int64), n)]
@@ -483,7 +498,10 @@ def per_event_array(joined: Joined, vals: dict[str, dict], names: list[str]) -> 
             "event_id": ak.Array(ids),
             "sample_id": ak.Array(samples),
         }
-        for name in names:
+        for name in cat.observables:
+            key = name if model == TRUTH else f"reco.{name}"
+            cols[name] = _column(vals[model].get(key), rows)
+        for name in cat.comparisons:
             cols[name] = _column(vals[model].get(name), rows)
         parts.append(ak.zip(cols, depth_limit=1))
     return ak.concatenate(parts) if parts else ak.Array([])

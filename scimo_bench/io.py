@@ -51,12 +51,21 @@ class Joined:
 
 
 def cutflow_row(
-    step, model, collection, events, objects, dropped=0, level="event", missing_events=None
+    step,
+    model,
+    collection,
+    events,
+    objects,
+    dropped=0,
+    level="event",
+    missing_events=None,
+    on="",
 ) -> dict:
-    """One row of `cutflow.csv`."""
+    """One row of `cutflow.csv` (`on`: which side a cut was applied to, for cut steps)."""
     return dict(
         step=step,
         level=level,
+        on=on,
         model=model,
         collection=collection,
         events=int(events),

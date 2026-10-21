@@ -13,7 +13,7 @@ model side (any family)                       scimo-bench
   or: prediction files handed in ─────────┘                              v
                                              io.py: load + join on event_id <── truth (raw data)
                                                         v
-                                             cutflow.py ─> variables.py ─> scorer.py ─> report.csv
+                                             cutflow.py ─> observables, comparisons ─> scorer.py ─> report.csv
                                                                                         rankings.csv
                                                                     perf.csv ─(gate)─> report.csv
                                                                                plotter.py <┘
@@ -28,14 +28,14 @@ protocol), `score` (files only), `plot` (from the CSVs). Default `[score, plot]`
 |--------|------|
 | `main.py` | entry: loads `models_file`, composes the config, runs the steps or submits jobs |
 | `steps.py` | the four steps; each reads and writes files in the run folder |
-| `configs/` | hydra-zen groups: `task`, `dataset` (+ `plot_specs`), `models`, `cutflow`, `plots`, `output`, `runtime`, `perf`, `site` |
-| `datasets/` | eval datasets: a truth reader and a variable registry per dataset (`cocoa.py`) |
+| `configs/` | hydra-zen groups: `task`, `dataset`, `models`, `cutflow`, `plots`, `output`, `runtime`, `perf`, `site` |
+| `datasets/` | eval datasets, one package each (`cocoa/`: `reader.py`, `observables.py`, `comparisons.py`, `plots.py`); `common.py`: jets, ΔR matching, EMD |
 | `schema.py` | contract v1: field names, validation, `meta` dataclass |
-| `io.py` | read predictions (Parquet), read truth (COCOA ROOT), join, dedupe, counts |
-| `variables.py` | `Registry`, `@REGISTRY.variable(name, label=, reference=)`, helpers, generic variables |
-| `cutflow.py` | `@cut(name, level=, variable=)` registry; masks on variables |
+| `io.py` | read predictions (Parquet), join, dedupe, counts |
+| `catalogue.py` | `@observable`, `@comparison`, `@plot` decorators; `Catalogue` of a dataset; names `truth.<obs>`, `reco.<obs>`, `<comparison>` |
+| `cutflow.py` | `@cut(level)` functions `(objects, value) -> mask`; each step cuts `on` truth, reco or both; event cuts on truth only |
 | `scorer.py` | statistics, binning, paired bootstrap, status, ranking, normalized score |
-| `plotter.py` | `@register_plot(name)` registry; distributions, binned metrics, ranking, Pareto |
+| `plotter.py` | `PlotContext` with helpers for plot functions (`hist`, `metric_vs_x`, truth/reco labels), style, ranking, Pareto |
 | `protocol.py` | the model protocol (the only interface to model code) |
 | `predict.py` | step `predict`: run a protocol model over the task's events, write its file |
 | `perf.py` | runtime, scenarios, timing, quality gate |
@@ -69,12 +69,13 @@ defaults to `${paths.preds}/<task>/<name>`. Each model is stored under its own p
 `models.<name>`, so `models=[a,b]` merges them side by side.
 
 Datasets (`configs/datasets.py`, group `dataset`) name the truth reader (`builds` of a class
-in `datasets/`, path relative to `paths.data`), the variables module, the collections
-predictions must have, and the plot catalogue, which composes into `plots.specs` (group
-`plot_specs`). Tasks (`configs/tasks.py`) name their default dataset, the event list (a
-file in this repo), parameters passed to the variables, metrics as `builds(Median, ...)`,
-the plots drawn by default, ranking and the quality gate. `dataset=<name>` overrides the
-task's dataset; the variables of the selected dataset are activated before the run.
+in `datasets/`, path relative to `paths.data`), the package of its observables,
+comparisons and plots (`module`), and the collections predictions must have. Tasks
+(`configs/tasks.py`) name their default dataset, the event list (a file in this repo),
+parameters of the comparisons (keyword arguments of the same name), metrics as
+`builds(Median, ...)` naming a comparison or `truth.<obs>` / `reco.<obs>`, the plots drawn by
+default (plot function names), ranking and the quality gate. `dataset=<name>` overrides the
+task's dataset. Every score step computes all observables and comparisons.
 `better` ∈ `lower | higher | {closest_to: v}`; used for rankings and Pareto dominance.
 Resolvers `linspace`, `logspace` are registered when `scimo_bench.configs` is imported.
 
@@ -88,7 +89,7 @@ outputs/<task>/<YYYY-MM-DD_HH-MM-SS>/
 │                           #   kind (quality|perf), task_version, condition
 ├── rankings.csv
 ├── cutflow.csv
-├── per_event.parquet       # variable values per event after cuts (re-scoring without reload)
+├── per_event.parquet       # every observable (truth, reco) and comparison per event after cuts
 ├── pareto.csv              # model, condition, x, y, intervals, on_front
 └── plots/
 ```

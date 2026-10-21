@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from scimo_bench import cutflow, io, scorer
+from scimo_bench.datasets.cocoa import CATALOGUE as COCOA
 from scimo_bench.scorer import (
     IQR,
     Efficiency,
@@ -18,14 +19,14 @@ from scimo_bench.scorer import (
 )
 from tests import synthetic
 
-CTX = dict(collection="particles", match_dr=0.05, emd_r=1.0)
+PARAMS = dict(match_dr=0.05, emd_r=1.0)
 EDGES = [0, 40, 80, 120, 160, 200, 1000]
 
 
 def score(truth, preds, metrics, n_boot=50, **kw):
     j = io.join(truth, preds)
     infos = [ModelInfo(m, "c") for m in preds]
-    return j, scorer.score(j, infos, metrics, CTX, n_boot=n_boot, **kw)
+    return j, scorer.score(j, infos, metrics, COCOA, PARAMS, n_boot=n_boot, **kw)
 
 
 @pytest.mark.parametrize("q", [0.0, 0.1, 0.25, 0.5, 0.77, 0.9, 1.0])
@@ -42,13 +43,13 @@ def test_weighted_quantile_equals_numpy(q):
 def test_values_match_numpy_references(truth):
     pred = synthetic.smeared(truth, 0.1)
     metrics = [
-        Median("med", "jet_energy_response"),
-        IQR("iqr", "jet_energy_response"),
-        Mean("mean", "jet_energy_response"),
-        Std("std", "jet_energy_response"),
-        Quantile("q90", "jet_energy_response", q=0.9),
-        Median("bmed", "jet_energy_response", x="jet_truth_pt", binning=EDGES),
-        Efficiency("eff", "particle_matched", x="particle_truth_pt", binning=[1, 5, 10, 1000]),
+        Median("med", "jet_e_response"),
+        IQR("iqr", "jet_e_response"),
+        Mean("mean", "jet_e_response"),
+        Std("std", "jet_e_response"),
+        Quantile("q90", "jet_e_response", q=0.9),
+        Median("bmed", "jet_e_response", x="truth.jet_pt", binning=EDGES),
+        Efficiency("eff", "particle_matched", x="truth.particle_pt", binning=[1, 5, 10, 1000]),
         FakeRate("fake", "particle_fake"),
     ]
     j, res = score(truth, {"m": pred}, metrics)
@@ -65,7 +66,7 @@ def test_values_match_numpy_references(truth):
     }
     for name, v in ref.items():
         assert r.loc[(name, np.nan), "value"] == pytest.approx(v, rel=1e-9), name
-    jpt = res.values["m"]["jet_truth_pt"]
+    jpt = res.values["m"]["truth.jet_pt"]
     for lo, hi in zip(EDGES[:-1], EDGES[1:], strict=True):
         sel = (jpt >= lo) & (jpt < hi)
         row = r.loc[("bmed", float(lo))]
@@ -81,7 +82,7 @@ def test_values_match_numpy_references(truth):
 
 
 def test_empty_bin_is_invalid(truth):
-    m = Median("m", "jet_energy_response", x="jet_truth_pt", binning=[1e5, 2e5])
+    m = Median("m", "jet_e_response", x="truth.jet_pt", binning=[1e5, 2e5])
     _, res = score(truth, {"a": synthetic.identical(truth)}, [m])
     binned = res.report[res.report.bin_low.notna()]
     assert (binned.status == "invalid").all() and binned.value.isna().all()
@@ -93,12 +94,12 @@ def test_missing_field_does_not_abort(truth):
         "noe": synthetic.missing_field(synthetic.identical(truth), "e"),
     }
     metrics = [
-        Median("resp", "jet_energy_response", x="jet_truth_pt", binning=EDGES),
+        Median("resp", "jet_e_response", x="truth.jet_pt", binning=EDGES),
         Median("emd", "event_emd"),
     ]
     j = io.join(truth, preds)
     infos = [ModelInfo("ok", "c"), ModelInfo("noe", "c"), ModelInfo("gone", "c", available=False)]
-    res = scorer.score(j, infos, metrics, CTX, n_boot=20)
+    res = scorer.score(j, infos, metrics, COCOA, PARAMS, n_boot=20)
     rep = res.report
     noe = rep[rep.model == "noe"]
     assert (noe[noe.metric == "resp"].status == "missing").all()
@@ -111,7 +112,7 @@ def test_missing_field_does_not_abort(truth):
 
 def test_paired_bootstrap_and_reproducibility(truth):
     preds = {"a": synthetic.smeared(truth, 0.1, seed=1), "b": synthetic.smeared(truth, 0.2, seed=2)}
-    metrics = [Median("med", "jet_energy_response"), IQR("iqr", "jet_energy_response")]
+    metrics = [Median("med", "jet_e_response"), IQR("iqr", "jet_e_response")]
     _, r1 = score(truth, preds, metrics, n_boot=100, seed=7)
     _, r2 = score(truth, preds, metrics, n_boot=100, seed=7)
     pd.testing.assert_frame_equal(r1.report, r2.report)
@@ -151,9 +152,9 @@ def test_rankings(truth):
         "noe": synthetic.missing_field(synthetic.smeared(truth, 0.01, seed=3), "e"),
     }
     metrics = [
-        IQR("iqr", "jet_energy_response"),
-        Median("med", "jet_energy_response", better={"closest_to": 1.0}),
-        Mean("mult", "n_pred", better="higher"),
+        IQR("iqr", "jet_e_response"),
+        Median("med", "jet_e_response", better={"closest_to": 1.0}),
+        Mean("mult", "reco.n_particles", better="higher"),
     ]
     _, res = score(truth, preds, metrics, n_boot=10)
     rk = scorer.rank(res.report, metrics, primary="iqr")
@@ -168,13 +169,15 @@ def test_rankings(truth):
     assert list(rk.columns) == scorer.RANKING_COLUMNS
 
 
+# 30 % smearing gives a few negative pT values; the EMD (computed in every run) warns on them
+@pytest.mark.filterwarnings("ignore:Problem infeasible")
 def test_normalized_score(truth):
     preds = {
         "base": synthetic.smeared(truth, 0.3, seed=1),
         "ref": synthetic.identical(truth),
         "mid": synthetic.smeared(truth, 0.15, seed=2),
     }
-    metrics = [IQR("iqr", "jet_energy_response")]
+    metrics = [IQR("iqr", "jet_e_response")]
     _, res = score(truth, preds, metrics, n_boot=5)
     rk = scorer.rank(res.report, metrics, normalization={"baseline": "base", "reference": "ref"})
     n = rk[rk.metric == "iqr"].set_index("model")["normalized"]
@@ -199,24 +202,29 @@ def test_per_event_table(truth):
         "noe": synthetic.missing_field(synthetic.identical(truth)),
     }
     j = io.join(truth, preds)
-    j = cutflow.apply(j, [cutflow.CutStep("min_particles", 3)])
+    j = cutflow.apply(j, [cutflow.CutStep("min_particles", 3, "truth")])
     res = scorer.score(
         j,
         [ModelInfo("a", "c"), ModelInfo("noe", "c")],
-        [Median("r", "jet_energy_response")],
-        CTX,
+        [Median("r", "jet_e_response")],
+        COCOA,
+        PARAMS,
         n_boot=0,
-        extra_variables=["particle_pred_pt"],
     )
     pe = res.per_event
     assert set(pe.fields) >= {
         "model",
         "event_id",
         "sample_id",
-        "jet_energy_response",
-        "particle_pred_pt",
+        "jet_e_response",
+        "particle_pt",
+        "jet_e",
     }
     assert ak.sum(pe.model == "a") == len(j.event_ids) == ak.sum(pe.model == "truth")
     noe = pe[pe.model == "noe"]
-    assert ak.all(ak.is_none(noe.jet_energy_response))
-    assert ak.all(ak.num(pe[pe.model == "a"].particle_pred_pt) >= 3)
+    assert ak.all(ak.is_none(noe.jet_e_response))
+    assert ak.all(ak.num(pe[pe.model == "a"].particle_pt) >= 3)
+    # every observable on both sides; comparisons for models only
+    assert ak.all(ak.is_none(pe[pe.model == "truth"].jet_e_response))
+    assert not ak.any(ak.is_none(pe[pe.model == "truth"].jet_e))
+    assert ak.all(ak.is_none(noe.jet_e))

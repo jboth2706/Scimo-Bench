@@ -1,10 +1,8 @@
 """Plot configs (group `plots`): which plots are drawn and how they look.
 
-- `plots.specs`: the plot catalogue of the selected dataset (`configs/datasets.py`); every
-  option of every plot can be overridden, e.g. `plots.specs.jet_pred_e.log_y=true`.
 - `plots.draw`: names drawn (default: the task's `plots`); `plots.extra` adds names,
-  `plots.skip` removes some. A name is a catalogue entry, a registered plot or a variable
-  (drawn as a distribution).
+  `plots.skip` removes some. A name is a plot function of the dataset (its `plots.py`) or a
+  generic plot (`ranking`). Binning, scales and labels are set in the plot function.
 - `plots.style`: look of all plots (colours, line styles, sizes, fonts, matplotlib rc).
 - `plots.pareto` (subgroup `plots/pareto`): a quality-vs-cost plot; `plots=pareto` adds one.
 

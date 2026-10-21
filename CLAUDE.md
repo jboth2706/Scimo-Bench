@@ -6,8 +6,8 @@ Context for AI agents working in this repo. Humans: see README.md.
 
 SciMo-Bench evaluates the predictions of scientific foundation models against the truth,
 and measures their inference cost. Configs (hydra-zen) define which models, data, cuts,
-metrics and plots apply; four Python modules define variables and cuts and compute metrics
-and plots. Several models run in one call and appear in the same plots. A fifth, optional
+metrics and plots apply; each dataset defines its observables, comparisons and plots as plain
+functions, and the core modules cut, compute metrics and draw. Several models run in one call and appear in the same plots. A fifth, optional
 module measures inference performance. Quality and cost are combined on Pareto fronts.
 
 M0, M1 and M3–M7 are built (status in README.md); M2 (the nanoHEP protocol class in
@@ -23,7 +23,7 @@ following `docs/PLAN.md`; each milestone has its own brief in `docs/tasks/M<n>.m
 | `docs/DESIGN.md` | architecture, config groups, outputs, performance rules, Pareto front |
 | `docs/CONTRACT.md` | the prediction contract v1 — the file format of predictions |
 | `docs/PROTOCOL.md` | the model protocol — the class through which scimo-bench runs a model |
-| `README.md` | per-call settings, datasets, variables, plots (how to add each) |
+| `README.md` | per-call settings, datasets, variables, cuts, plots (how to add each) |
 | `docs/HEP4M_CONTEXT.md` | facts about the first producer (hep4m_scimo / nanoHEP) and the COCOA data |
 | `docs/tasks/M<n>.md` | one self-contained work order per milestone |
 
@@ -45,14 +45,17 @@ following `docs/PLAN.md`; each milestone has its own brief in `docs/tasks/M<n>.m
 2. **The model/benchmark boundary is in physical space.** The benchmark reads events and
    objects in physical units (GeV, rad) keyed by `event_id`. It never sees tokens,
    vocabularies or checkpoints. Model-family details live in `meta`.
-3. **Quality path never runs models.** `io → cutflow → variables → scorer → plotter` works on
+3. **Quality path never runs models.** `io → cutflow → observables/comparisons → scorer → plotter` works on
    files only. Model code runs only through the model protocol (`protocol.py`, a class named
    in the model config), in the steps `predict` and `perf`, in jobs on a cluster.
-4. **One source for physics.** Every quantity is a registered variable: generic ones in
-   `variables.py`, dataset-specific ones in the dataset's module (`datasets/<name>.py`,
-   its `REGISTRY`). Cuts (`cutflow.py`) are built on those variables; `scorer.py` and
-   `plotter.py` compute no physics themselves. Reading a dataset's truth format lives in
-   its reader class, not in `io.py`.
+4. **One source for physics.** Every quantity is a function of its dataset package
+   (`datasets/<name>/`): an `@observable` (one set of events, run on truth and on every
+   model) in `observables.py`, or a `@comparison` (truth and one model) in
+   `comparisons.py`; shared helpers in `datasets/common.py`. Each plot is one `@plot`
+   function in `plots.py`. `scorer.py` and `plotter.py` compute no physics themselves.
+   Reading a dataset's truth format lives in its reader (`reader.py`), not in `io.py`.
+   Truth vs reco (the models' output) is always explicit: cut `on`, metric `truth.`/`reco.`
+   names, plot labels.
 5. **All models on the same basis.** Same events (after the join), same cutflow, same binning,
    same normalization. Paired bootstrap over events.
 6. **Gaps do not abort.** A missing field, metric or plot for one model → status `missing`
@@ -80,6 +83,7 @@ following `docs/PLAN.md`; each milestone has its own brief in `docs/tasks/M<n>.m
 pixi install                      # default env: quality path (CPU, no torch)
 pixi run test                     # all tests (in-process; `pixi run test-job raven` as a job)
 pixi run lint                     # ruff check + format check
+pixi run precommit                # all pre-commit hooks (ruff, yamlfix, yamllint), as on commit
 # models come from the user's models file (example: examples/hep4m_models.py)
 ./run.sh site=raven models_file=<file> task=pflow 'models=[a,b]' cutflow=central   # score + plot (CPU job)
 ./run.sh site=raven models_file=<file> task=pflow 'models=[a,b]' \

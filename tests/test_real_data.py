@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from scimo_bench import io
-from scimo_bench.datasets.cocoa import CocoaTruth
+from scimo_bench.datasets.cocoa.reader import CocoaTruth
 from tests import synthetic
 from tests.conftest import COCOA_VAL, MODELS_FILE, run_bench
 

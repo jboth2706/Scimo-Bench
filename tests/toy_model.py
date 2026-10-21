@@ -8,7 +8,7 @@ import awkward as ak
 import numpy as np
 
 from scimo_bench.datasets import ContractTruth
-from scimo_bench.datasets.cocoa import CocoaTruth
+from scimo_bench.datasets.cocoa.reader import CocoaTruth
 
 WIDTH, DEPTH = 32, 8
 

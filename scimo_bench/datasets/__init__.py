@@ -1,24 +1,24 @@
-"""Eval datasets: how to read a dataset's truth, and which variables it has.
+"""Eval datasets: how to read a dataset's truth, and its observables, comparisons, plots.
 
 A dataset is a config entry (group `dataset`, `scimo_bench/configs/datasets.py`) naming
 - `truth`: a reader object with `read(event_ids) -> ak.Array` in the internal layout
   (`event_id` + one jagged record field per collection, values in physical units);
-- `variables`: the module that defines its variable registry `REGISTRY`;
-- its plot catalogue (`plots.specs`).
+- `module`: its package here (e.g. `scimo_bench.datasets.cocoa`) with `observables.py`,
+  `comparisons.py`, `plots.py` and a `CATALOGUE` (see `scimo_bench/catalogue.py`).
 
-A new dataset = a module here (reader + variables) and one entry in the config.
+Shared physics helpers (jets, matching, EMD) are in `common.py`.
+A new dataset = a package here (reader + the three modules) and one entry in the config.
 """
 
 from __future__ import annotations
 
-import importlib
 import os
 from typing import Protocol
 
 import awkward as ak
 import numpy as np
 
-from scimo_bench import io, variables
+from scimo_bench import io
 from scimo_bench.schema import EVENT_ID, SAMPLE_ID
 
 
@@ -42,10 +42,3 @@ class ContractTruth:
         if event_ids is not None:
             arr = arr[np.isin(ak.to_numpy(arr[EVENT_ID]), np.asarray(event_ids))]
         return arr
-
-
-def activate(module: str) -> variables.Registry:
-    """Import a dataset's variables module and make its `REGISTRY` the active one."""
-    registry = importlib.import_module(module).REGISTRY
-    variables.use(registry)
-    return registry

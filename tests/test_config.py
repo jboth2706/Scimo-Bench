@@ -3,13 +3,13 @@ from hydra import compose, initialize
 from hydra_zen import builds, instantiate
 from omegaconf import OmegaConf
 
-from scimo_bench import datasets, variables
+from scimo_bench import catalogue, plotter
 from scimo_bench import steps as bench_steps
 from scimo_bench.configs import load_models_file
 from scimo_bench.configs.models import add_model
 from scimo_bench.cutflow import CutStep
 from scimo_bench.io import REPO_ROOT
-from scimo_bench.plotter import Distribution, MetricVsX, ParetoPlot
+from scimo_bench.plotter import ParetoPlot
 from scimo_bench.scorer import IQR, Median, Metric
 from tests.conftest import MODELS_FILE, run_bench
 
@@ -80,15 +80,15 @@ def test_misspelled_builds_argument_fails_at_compose_time():
 
 def test_task_metrics_and_plots_instantiate():
     c = cfg("task=pflow", "cutflow=central", "plots=pareto")
-    metrics = bench_steps.task_metrics(c)
+    cat = bench_steps.dataset_catalogue(c)
+    metrics = bench_steps.task_metrics(c, cat)
     assert all(isinstance(m, Metric) for m in metrics)
     by_name = {m.name: m for m in metrics}
     assert isinstance(by_name["response_iqr"], IQR)
     assert by_name["response_iqr"].binning == pytest.approx(list(range(0, 201, 20)))
     assert by_name["response_median"].better == {"closest_to": 1.0}
-    plots = bench_steps.plot_objects(c)
-    assert any(isinstance(p, Distribution) for p in plots)
-    assert any(isinstance(p, MetricVsX) for p in plots)
+    plots = bench_steps.plot_objects(c, cat)
+    assert plots[0] is cat.plots["jet_e_response"] and plotter.ranking in plots
     assert isinstance(plots[-1], ParetoPlot) and plots[-1].x == "latency_p50"
     steps = instantiate(c.cutflow.steps)
     assert [s.cut for s in steps] == ["max_abs_eta", "min_pt", "min_particles"]
@@ -140,19 +140,24 @@ def test_local_site_needs_a_data_root(tmp_path):
     assert proc.returncode != 0 and "set paths.data" in proc.stderr
 
 
-def test_dataset_brings_its_reader_variables_and_plots():
+def test_dataset_brings_its_reader_and_catalogue():
     c = cfg("task=pflow")
-    assert c.dataset.name == "cocoa" and c.dataset.variables == "scimo_bench.datasets.cocoa"
+    assert c.dataset.name == "cocoa" and c.dataset.module == "scimo_bench.datasets.cocoa"
     assert c.dataset.truth._target_.endswith("CocoaTruth")
-    assert {"jet_pred_e", "response_vs_pt", "ranking"} <= set(c.plots.specs)
     assert list(c.plots.draw) == list(c.task.plots)
+    cat = catalogue.load(c.dataset.module)
+    assert {"jet_e", "n_tracks"} <= set(cat.observables)
+    assert {"jet_e_response", "event_emd"} <= set(cat.comparisons)
+    assert {"jet_e", "response_vs_pt"} <= set(cat.plots)
     s = cfg("task=pflow", "dataset=synthetic")
     assert s.dataset.truth._target_.endswith("ContractTruth")
-    assert set(s.plots.specs) == set(c.plots.specs)
+    assert s.dataset.module == c.dataset.module
 
 
-def test_variables_are_per_dataset():
-    from_cocoa = datasets.activate("scimo_bench.datasets.cocoa")
-    assert from_cocoa.exists("jet_pred_e") and from_cocoa.exists("n_pred")  # own + generic
-    assert not variables.GENERIC.exists("jet_pred_e")
-    assert variables.active() is from_cocoa
+def test_metric_and_param_names_are_checked():
+    c = cfg("task=pflow", "task.metrics.1.x=jet_pt")
+    cat = bench_steps.dataset_catalogue(c)
+    with pytest.raises(ValueError, match="truth.jet_pt or reco.jet_pt"):
+        bench_steps.task_metrics(c, cat)
+    with pytest.raises(ValueError, match=r"task.params \['match_r'\]"):
+        bench_steps.check_params(cfg("task=pflow", "+task.params.match_r=0.1"), cat)

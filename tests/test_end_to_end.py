@@ -41,15 +41,15 @@ def test_output_folder(quality_run):
     } <= names
     plots = {p.name for p in (quality_run / "plots").iterdir()}
     for stem in (
-        "jet_energy_response",
+        "jet_e_response",
         "response_vs_pt",
         "efficiency_vs_pt",
         "ranking",
-        "jet_pred_e",
+        "jet_e",
     ):
         assert {f"{stem}.png", f"{stem}.pdf"} <= plots
     cfg = OmegaConf.load(quality_run / "resolved_config.yaml")
-    assert cfg.cutflow.steps[0].cut == "max_abs_eta"
+    assert cfg.cutflow.steps[0].cut == "max_abs_eta" and cfg.cutflow.steps[0].on == "both"
     assert len(cfg.task.binnings.jet_pt) == 11  # resolvers resolved
 
 
@@ -153,23 +153,18 @@ def test_perf_finds_latest_run(contract_dir, tmp_path):
     assert "output:" in proc.stderr
 
 
-def test_plots_are_configurable_from_the_command_line(contract_dir, tmp_path):
+def test_plot_selection_from_the_command_line(contract_dir, tmp_path):
     out = tmp_path / "cfg"
     run_bench(
         *synthetic_overrides(contract_dir, out),
-        "plots.specs.jet_pred_e.log_y=true",
-        "plots.specs.jet_pred_e.title=custom title",
-        "+plots.specs.jet_eta={_target_: scimo_bench.plotter.Distribution, "
-        "variable: jet_pred_eta, bins: 20, name: jet_eta}",
-        "plots.extra=[jet_eta,particle_dr]",
+        "plots.extra=[jet_eta,particle_pt_response]",
         "plots.skip=[ranking]",
         "models.dummy.color=black",
         "plots.style.font_size=12",
     )
     names = {p.stem for p in (out / "plots").iterdir()}
-    assert {"jet_eta", "particle_dr", "jet_pred_e"} <= names and "ranking" not in names
+    assert {"jet_eta", "particle_pt_response", "jet_e"} <= names and "ranking" not in names
     cfg = OmegaConf.load(out / "resolved_config.yaml")
-    assert cfg.plots.specs.jet_pred_e.log_y and cfg.plots.specs.jet_pred_e.ratio_range
     assert cfg.models.dummy.color == "black" and cfg.dataset.name == "synthetic"
 
 

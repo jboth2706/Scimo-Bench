@@ -7,7 +7,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from scimo_bench import io
-from scimo_bench.datasets.cocoa import CocoaTruth
+from scimo_bench.datasets.cocoa.reader import CocoaTruth
 from scimo_bench.schema import Meta, condition_hash, validate
 from tests import synthetic
 from tests.conftest import COCOA_VAL
@@ -151,6 +151,8 @@ def test_real_cocoa_truth():
     truth = CocoaTruth(COCOA_VAL).read()
     assert len(truth) == 99_955
     assert set(truth.particles.fields) == {"pt", "eta", "phi", "e", "pdgid"}
+    assert {"pt", "eta", "phi", "d0", "z0", "particle_idx"} == set(truth.tracks.fields)
+    assert ak.sum(ak.num(truth.tracks)) > 0
     _, groups = io.duplicate_groups(truth)
     assert (groups * (groups - 1) // 2).sum() == 413  # 398 pairs + 5 triplets
     _, n_dup = io.dedupe_objects(truth)

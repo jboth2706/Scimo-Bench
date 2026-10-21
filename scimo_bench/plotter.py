@@ -1,20 +1,27 @@
 """Plots from the result files of one run folder (no physics here).
 
-Reads `report.csv`, `rankings.csv` and `per_event.parquet`; draws every model into the same
-axes with a fixed style per model. Plot kinds are classes registered with
-`@register_plot(name)`; every constructor argument is a config option (`plots.specs.<plot>`).
-The look of all plots comes from `Style` (`plots.style`). A plot name resolves to a
-catalogue spec, else a registered plot, else a variable (drawn as a distribution).
+A plot is a function `fn(p) -> figure` decorated with `@plot` (`scimo_bench.catalogue`),
+in the dataset's `plots.py`; `p` is a `PlotContext` with the run's files and helpers:
 
-A new plot kind: a class with a `name` attribute and `draw(pc: PlotContext) -> list[Path]`,
-decorated with `@register_plot("kind")`.
+    @plot
+    def jet_pt(p):
+        fig, ax, rax = p.figure(ratio=True)
+        p.hist(ax, "jet_pt", np.linspace(0, 200, 41), ratio_ax=rax)
+        p.legend(ax)
+        return fig
+
+The figure is saved as `plots/<function name>.<fmt>`; a figure without data is skipped.
+Helpers label every curve with its level: truth is "truth", a model's output
+"<model> (reco)"; an axis says "(truth)" or "(reco)" when only one level is drawn.
+Generic plots (any dataset): `ranking` here, and the Pareto plot (`plots.pareto`).
+The look of all plots comes from `Style` (`plots.style`).
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -29,8 +36,8 @@ import matplotlib.ticker as mticker  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+from scimo_bench.catalogue import Catalogue, plot, split  # noqa: E402
 from scimo_bench.scorer import Metric, better_key, overall  # noqa: E402
-from scimo_bench.variables import exists, info  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -162,8 +169,8 @@ def model_styles(
 
 @dataclass
 class PlotContext:
-    """Everything a plot may read: the run's result files, the models with their labels
-    and styles, the task's metrics, and the style."""
+    """What a plot function gets: the run's result files, the models with their labels and
+    styles, the task's metrics, the dataset's catalogue (labels, units), and helpers."""
 
     folder: Path
     report: pd.DataFrame
@@ -172,6 +179,7 @@ class PlotContext:
     models: list[str]
     labels: dict[str, str]
     metrics: dict[str, Metric]
+    catalogue: Catalogue = field(default_factory=Catalogue)
     formats: list[str] = field(default_factory=lambda: ["png", "pdf"])
     task: str = ""
     style: Style = field(default_factory=Style)
@@ -187,16 +195,17 @@ class PlotContext:
         """Display label of a model."""
         return self.labels.get(model, model)
 
-    def select(self, subset: Sequence[str] | None) -> list[str]:
+    def select(self, subset: Sequence[str] | None = None) -> list[str]:
         """The run's models, restricted to `subset` if given (order kept)."""
         return [m for m in self.models if subset is None or m in set(subset)]
 
-    def values(self, model: str, variable: str) -> np.ndarray | None:
-        """Finite values of a variable for a model (or 'truth') from per_event.parquet."""
+    def values(self, side: str, name: str) -> np.ndarray | None:
+        """Finite values of an observable or comparison from per_event.parquet, for
+        `side` = "truth" or a model name (its reco output); flattened if per object."""
         pe = self.per_event
-        if pe is None or variable not in pe.fields:
+        if pe is None or name not in pe.fields:
             return None
-        v = pe[pe["model"] == model][variable]
+        v = pe[pe["model"] == side][name]
         v = v[~ak.is_none(v, axis=0)]
         if len(v) == 0:
             return None
@@ -205,8 +214,10 @@ class PlotContext:
         a = ak.to_numpy(v).astype(np.float64)
         return a[np.isfinite(a)]
 
-    def figure(self, figsize: Sequence[float] | None, ratio: bool = False):
-        """A figure (with a ratio panel below if `ratio`): (fig, ax, ratio_ax or None)."""
+    # --- building blocks for plot functions ------------------------------------------------
+
+    def figure(self, ratio: bool = False, figsize: Sequence[float] | None = None):
+        """A figure: (fig, ax), or (fig, ax, ratio_ax) with a ratio panel below."""
         if ratio:
             fig, (ax, rax) = plt.subplots(
                 2,
@@ -217,14 +228,109 @@ class PlotContext:
             )
             return fig, ax, rax
         fig, ax = plt.subplots(figsize=tuple(figsize or self.style.figsize))
-        return fig, ax, None
+        return fig, ax
 
-    def legend(self, ax, title: str | None, show: bool = True) -> None:
+    def hist(
+        self,
+        ax,
+        name: str,
+        bins: Sequence[float],
+        ratio_ax=None,
+        truth: bool = True,
+        models: Sequence[str] | None = None,
+        density: bool = True,
+    ) -> None:
+        """Histogram of an observable or comparison, with bin edges `bins`.
+
+        Observable: the truth as a grey filled histogram ("truth"), each model's output as a
+        line ("<model> (reco)"), and with `ratio_ax` the ratio reco / truth. Comparison: one
+        line per model. The x label comes from the catalogue; it says "(truth)" or "(reco)"
+        when only one level is drawn. Nothing is drawn if there is no data.
+        """
+        info = self.catalogue.info(name)
+        is_obs = info.kind == "observable"
+        edges = np.asarray(bins, dtype=float)
+        t = self.values("truth", name) if is_obs and truth else None
+        t = t if t is not None and len(t) else None
+        data = {m: self.values(m, name) for m in self.select(models)}
+        data = {m: v for m, v in data.items() if v is not None and len(v)}
+        if t is None and not data:
+            log.warning("hist %s: no data", name)
+            return
+        h_t = None
+        if t is not None:
+            h_t, _ = np.histogram(t, edges, density=density)
+            ax.stairs(h_t, edges, fill=True, color=self.style.truth_color, label="truth", lw=0)
+        for m, v in data.items():
+            st = self.styles[m]
+            h, _ = np.histogram(v, edges, density=density)
+            ax.stairs(h, edges, label=self.label(m) + (" (reco)" if is_obs else ""), **st)
+            if ratio_ax is not None and h_t is not None:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    ratio_ax.stairs(np.where(h_t > 0, h / h_t, np.nan), edges, **st)
+        if info.reference is not None:
+            ax.axvline(info.reference, color=self.style.muted, lw=1, ls=":")
+        ax.set_ylabel("density" if density else "entries")
+        side = None
+        if is_obs and not data:
+            side = "truth"
+        elif is_obs and t is None:
+            side = "reco"
+        (ratio_ax if ratio_ax is not None else ax).set_xlabel(info.axis_label(side))
+        if ratio_ax is not None:
+            ratio_ax.axhline(1.0, color=self.style.muted, lw=1)
+            ratio_ax.set_ylabel("reco / truth")
+            ratio_ax.set_ylim(0.5, 1.5)
+
+    def metric_vs_x(
+        self, ax, metric: str, log_x: bool = False, models: Sequence[str] | None = None
+    ) -> None:
+        """A binned metric from report.csv against its x, one line per model with its
+        interval band. The x label names the side of x (e.g. "jet $p_T$ (truth)")."""
+        m = self.metrics.get(metric)
+        rows = self.report[(self.report["metric"] == metric) & self.report["bin_low"].notna()]
+        if m is None or m.x is None or rows.empty:
+            log.warning("metric_vs_x %s: no binned rows", metric)
+            return
+        drawn = False
+        for model in self.select(models):
+            r = rows[rows["model"] == model].sort_values("bin_low")
+            ok = r["status"] == "ok"
+            if not ok.any():
+                continue
+            lo_e, hi_e = r["bin_low"].to_numpy(), r["bin_high"].to_numpy()
+            x = np.sqrt(lo_e * hi_e) if log_x and lo_e.min() > 0 else 0.5 * (lo_e + hi_e)
+            y = np.where(ok, r["value"], np.nan)
+            lo, hi = np.where(ok, r["lower"], np.nan), np.where(ok, r["upper"], np.nan)
+            st = self.styles[model]
+            ax.fill_between(x, lo, hi, color=st["color"], alpha=0.18, lw=0)
+            ax.plot(x, y, label=self.label(model), marker="o", ms=4, **st)
+            drawn = True
+        if not drawn:
+            return
+        ref = self.catalogue.info(m.variable).reference
+        if m.location and ref is not None:
+            ax.axhline(ref, color=self.style.muted, lw=1, ls=":")
+        side, _ = split(m.x)
+        ax.set_xlabel(self.catalogue.info(m.x).axis_label(side))
+        ax.set_ylabel(m.label)
+        if log_x:
+            self.log_x(ax)
+
+    @staticmethod
+    def log_x(ax) -> None:
+        """Log x axis with plain number labels."""
+        ax.set_xscale("log")
+        ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
+        ax.xaxis.set_minor_formatter(mticker.NullFormatter())
+
+    def legend(self, ax, title: str | None = None) -> None:
         """Legend above the axes (never over the data) or at `style.legend`, with the task
-        (or `title`) as its title; one series (or `show=False`) gets only the title."""
+        (or `title`) as its title; one series is named in the title instead."""
         title = title if title is not None else self.task
-        handles, _ = ax.get_legend_handles_labels()
-        if not show or len(handles) < 2:
+        handles, labels = ax.get_legend_handles_labels()
+        if len(handles) < 2:
+            title = f"{title} · {labels[0]}" if labels else title
             ax.set_title(
                 title, loc="left", fontsize=self.style.font_size - 1, color=self.style.muted
             )
@@ -256,274 +362,50 @@ class PlotContext:
         return paths
 
 
-PLOTS: dict[str, type] = {}
+# --- generic plots -------------------------------------------------------------------------
 
 
-def register_plot(name: str):
-    """Class decorator: make a plot kind available by `name`."""
-
-    def wrap(cls):
-        PLOTS[name] = cls
-        cls.kind = name
-        return cls
-
-    return wrap
-
-
-def _log_x(ax) -> None:
-    """Log x axis with plain number labels."""
-    ax.set_xscale("log")
-    ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
-    ax.xaxis.set_minor_formatter(mticker.NullFormatter())
-
-
-@register_plot("distribution")
-class Distribution:
-    """Histogram of a variable: truth as a grey filled histogram, models as step lines,
-    optional ratio panel (model / truth).
-
-    `bins`: number (range from `x_range` or the data's 0.5–99.5 % quantiles) or edges.
-    `models`: draw only these models. `truth`: draw the truth counterpart. `reference`:
-    draw the variable's ideal value as a dotted line.
-    """
-
-    def __init__(
-        self,
-        variable: str,
-        bins: int | list[float] = 50,
-        x_range: list[float] | None = None,
-        density: bool = True,
-        ratio: bool = True,
-        ratio_range: list[float] = (0.5, 1.5),
-        ratio_label: str = "model / truth",
-        log_x: bool = False,
-        log_y: bool = False,
-        xlabel: str | None = None,
-        ylabel: str | None = None,
-        title: str | None = None,
-        truth: bool = True,
-        truth_label: str = "truth",
-        reference: bool = True,
-        legend: bool = True,
-        figsize: list[float] | None = None,
-        models: list[str] | None = None,
-        name: str | None = None,
-    ):
-        self.variable = variable
-        self.bins = bins
-        self.x_range = x_range
-        self.density = density
-        self.ratio = ratio
-        self.ratio_range = ratio_range
-        self.ratio_label = ratio_label
-        self.log_x = log_x
-        self.log_y = log_y
-        self.xlabel = xlabel
-        self.ylabel = ylabel
-        self.title = title
-        self.truth = truth
-        self.truth_label = truth_label
-        self.reference = reference
-        self.legend = legend
-        self.figsize = figsize
-        self.models = models
-        self.name = name or variable
-
-    def draw(self, pc: PlotContext) -> list[Path]:
-        meta = info(self.variable)
-        data = {m: pc.values(m, self.variable) for m in pc.select(self.models)}
-        data = {m: v for m, v in data.items() if v is not None and len(v)}
-        truth = pc.values("truth", meta.truth) if meta.truth and self.truth else None
-        if meta.truth_only:
-            truth, data = pc.values("truth", self.variable), {}
-        if not data and truth is None:
-            log.warning("plot %s: no data", self.name)
-            return []
-        edges = self._edges([*data.values(), *([truth] if truth is not None else [])])
-        ratio = self.ratio and truth is not None and len(data) > 0
-        fig, ax, rax = pc.figure(self.figsize, ratio)
-        h_truth = None
-        if truth is not None:
-            h_truth, _ = np.histogram(truth, edges, density=self.density)
-            ax.stairs(
-                h_truth, edges, fill=True, color=pc.style.truth_color, label=self.truth_label, lw=0
+@plot
+def ranking(p: PlotContext):
+    """Rank of every model per metric (rows), the value written in each cell."""
+    rk = p.rankings
+    if rk is None or rk.empty:
+        log.warning("plot ranking: no rankings.csv")
+        return None
+    metrics = list(dict.fromkeys(rk["metric"]))
+    models = [m for m in p.select() if m in set(rk["model"])]
+    ranks = np.full((len(metrics), len(models)), np.nan)
+    vmax = max(len(models), 2) + 1.5
+    fig, ax = plt.subplots(figsize=(1.6 + 1.6 * len(models), 0.9 + 0.45 * len(metrics)))
+    for i, met in enumerate(metrics):
+        for j, m in enumerate(models):
+            r = rk[(rk["metric"] == met) & (rk["model"] == m)].iloc[0]
+            ranks[i, j] = r["rank"]
+            txt = f"#{int(r['rank'])}" if r["status"] == "ok" else r["status"]
+            if r["status"] == "ok":
+                txt += f"\n{r['value']:.4g}"
+            dark = r["rank"] <= 1 + 0.4 * (vmax - 1)
+            ax.text(
+                j,
+                i,
+                txt,
+                ha="center",
+                va="center",
+                fontsize=p.style.font_size - 2,
+                color="white" if dark else p.style.ink,
             )
-        for m, v in data.items():
-            st = pc.styles[m]
-            h, _ = np.histogram(v, edges, density=self.density)
-            ax.stairs(h, edges, label=pc.label(m), **st)
-            if ratio:
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    rax.stairs(np.where(h_truth > 0, h / h_truth, np.nan), edges, **st)
-        if self.reference and meta.reference is not None:
-            ax.axvline(meta.reference, color=pc.style.muted, lw=1, ls=":")
-        ax.set_ylabel(self.ylabel or ("density" if self.density else "entries"))
-        if self.log_y:
-            ax.set_yscale("log")
-        pc.legend(ax, self.title, self.legend)
-        last = rax if ratio else ax
-        if ratio:
-            rax.axhline(1.0, color=pc.style.muted, lw=1)
-            rax.set_ylabel(self.ratio_label)
-            rax.set_ylim(*self.ratio_range)
-        last.set_xlabel(self.xlabel or meta.axis_label)
-        if self.log_x:
-            _log_x(last)
-        return pc.save(fig, self.name)
-
-    def _edges(self, arrays: list[np.ndarray]) -> np.ndarray:
-        """Bin edges: given, or from `x_range` / the data's quantiles."""
-        if not isinstance(self.bins, int):
-            return np.asarray(self.bins, dtype=float)
-        if self.x_range is not None:
-            lo, hi = self.x_range
-        else:
-            lo, hi = np.quantile(np.concatenate(arrays), [0.005, 0.995])
-        if lo == hi:
-            lo, hi = lo - 0.5, hi + 0.5
-        if self.log_x and lo > 0:
-            return np.geomspace(lo, hi, self.bins + 1)
-        return np.linspace(lo, hi, self.bins + 1)
+    ax.imshow(ranks, cmap="Blues_r", vmin=1, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(len(models)), [p.label(m) for m in models], rotation=20, ha="right")
+    ax.set_yticks(range(len(metrics)), metrics)
+    ax.grid(False)
+    for s in ax.spines.values():
+        s.set_visible(False)
+    title = f"{p.task}: rank per metric (1 = best)"
+    ax.set_title(title, loc="left", fontsize=p.style.font_size - 1, color=p.style.muted)
+    return fig
 
 
-@register_plot("metric_vs_x")
-class MetricVsX:
-    """A binned metric from report.csv against its x variable, one line per model with
-    its interval band. `reference`: the variable's ideal value as a dotted line."""
-
-    def __init__(
-        self,
-        metric: str,
-        log_x: bool = False,
-        log_y: bool = False,
-        xlabel: str | None = None,
-        ylabel: str | None = None,
-        y_range: list[float] | None = None,
-        title: str | None = None,
-        band: bool = True,
-        markers: bool = True,
-        reference: bool = True,
-        legend: bool = True,
-        figsize: list[float] | None = None,
-        models: list[str] | None = None,
-        name: str | None = None,
-    ):
-        self.metric = metric
-        self.log_x = log_x
-        self.log_y = log_y
-        self.xlabel = xlabel
-        self.ylabel = ylabel
-        self.y_range = y_range
-        self.title = title
-        self.band = band
-        self.markers = markers
-        self.reference = reference
-        self.legend = legend
-        self.figsize = figsize
-        self.models = models
-        self.name = name or f"{metric}_vs_x"
-
-    def draw(self, pc: PlotContext) -> list[Path]:
-        metric = pc.metrics.get(self.metric)
-        rows = pc.report[(pc.report["metric"] == self.metric) & pc.report["bin_low"].notna()]
-        if metric is None or metric.x is None or rows.empty:
-            log.warning("plot %s: no binned rows for metric %s", self.name, self.metric)
-            return []
-        fig, ax, _ = pc.figure(self.figsize)
-        drawn = False
-        for m in pc.select(self.models):
-            r = rows[(rows["model"] == m)].sort_values("bin_low")
-            ok = r["status"] == "ok"
-            if not ok.any():
-                continue
-            lo_e, hi_e = r["bin_low"].to_numpy(), r["bin_high"].to_numpy()
-            x = np.sqrt(lo_e * hi_e) if self.log_x and lo_e.min() > 0 else 0.5 * (lo_e + hi_e)
-            y = np.where(ok, r["value"], np.nan)
-            lo, hi = np.where(ok, r["lower"], np.nan), np.where(ok, r["upper"], np.nan)
-            st = pc.styles[m]
-            if self.band:
-                ax.fill_between(x, lo, hi, color=st["color"], alpha=0.18, lw=0)
-            marker = dict(marker="o", ms=4) if self.markers else {}
-            ax.plot(x, y, label=pc.label(m), **marker, **st)
-            drawn = True
-        if not drawn:
-            plt.close(fig)
-            return []
-        ref = info(metric.variable).reference if exists(metric.variable) else None
-        if self.reference and metric.location and ref is not None:
-            ax.axhline(ref, color=pc.style.muted, lw=1, ls=":")
-        ax.set_xlabel(self.xlabel or info(metric.x).axis_label)
-        ax.set_ylabel(self.ylabel or metric.label)
-        if self.y_range is not None:
-            ax.set_ylim(*self.y_range)
-        if self.log_x:
-            _log_x(ax)
-        if self.log_y:
-            ax.set_yscale("log")
-        pc.legend(ax, self.title, self.legend)
-        return pc.save(fig, self.name)
-
-
-@register_plot("ranking")
-class RankingPlot:
-    """Rank of every model per metric (rows), the value written in each cell.
-    `metrics`: only these rows (default all, incl. `mean_rank`)."""
-
-    def __init__(
-        self,
-        metrics: list[str] | None = None,
-        cmap: str = "Blues_r",
-        show_values: bool = True,
-        title: str | None = None,
-        figsize: list[float] | None = None,
-        models: list[str] | None = None,
-        name: str = "ranking",
-    ):
-        self.metrics = metrics
-        self.cmap = cmap
-        self.show_values = show_values
-        self.title = title
-        self.figsize = figsize
-        self.models = models
-        self.name = name
-
-    def draw(self, pc: PlotContext) -> list[Path]:
-        rk = pc.rankings
-        if rk is None or rk.empty:
-            log.warning("plot ranking: no rankings.csv")
-            return []
-        metrics = [m for m in dict.fromkeys(rk["metric"]) if not self.metrics or m in self.metrics]
-        models = [m for m in pc.select(self.models) if m in set(rk["model"])]
-        ranks = np.full((len(metrics), len(models)), np.nan)
-        vmax = max(len(models), 2) + 1.5
-        size = self.figsize or (1.6 + 1.6 * len(models), 0.9 + 0.45 * len(metrics))
-        fig, ax = plt.subplots(figsize=tuple(size))
-        for i, met in enumerate(metrics):
-            for j, m in enumerate(models):
-                r = rk[(rk["metric"] == met) & (rk["model"] == m)].iloc[0]
-                ranks[i, j] = r["rank"]
-                txt = f"#{int(r['rank'])}" if r["status"] == "ok" else r["status"]
-                if self.show_values and r["status"] == "ok":
-                    txt += f"\n{r['value']:.4g}"
-                dark = r["rank"] <= 1 + 0.4 * (vmax - 1)
-                ax.text(
-                    j,
-                    i,
-                    txt,
-                    ha="center",
-                    va="center",
-                    fontsize=pc.style.font_size - 2,
-                    color="white" if dark else pc.style.ink,
-                )
-        ax.imshow(ranks, cmap=self.cmap, vmin=1, vmax=vmax, aspect="auto")
-        ax.set_xticks(range(len(models)), [pc.label(m) for m in models], rotation=20, ha="right")
-        ax.set_yticks(range(len(metrics)), metrics)
-        ax.grid(False)
-        for s in ax.spines.values():
-            s.set_visible(False)
-        title = self.title or f"{pc.task}: rank per metric (1 = best)"
-        ax.set_title(title, loc="left", fontsize=pc.style.font_size - 1, color=pc.style.muted)
-        return pc.save(fig, self.name)
+GENERIC_PLOTS: dict[str, Callable] = {"ranking": ranking}
 
 
 def parse_condition(cond: str) -> dict[str, str]:
@@ -569,7 +451,6 @@ def pareto_front(x, y, y_better="lower", x_err=None, y_err=None, robust=False) -
     return front
 
 
-@register_plot("pareto")
 class ParetoPlot:
     """Quality metric `y` against cost `x` (a perf metric under one fixed perf condition,
     e.g. {scenario: single, batch_size: 1}); writes its points to `pareto.csv`.
@@ -666,7 +547,7 @@ class ParetoPlot:
             )
         )
         pc.pareto_rows.extend(pts[PARETO_COLUMNS].to_dict("records"))
-        fig, ax, _ = pc.figure(self.figsize or (6.0, 4.5))
+        fig, ax = pc.figure(figsize=self.figsize or (6.0, 4.5))
         if self.show_front:
             front = pts[pts["on_front"]].sort_values("x")
             ax.plot(
@@ -702,7 +583,7 @@ class ParetoPlot:
             if self.connect_sweeps and len(r) > 1:
                 ax.plot(r["x"], r["y"], color=st["color"], ls=st["linestyle"], lw=1.2, zorder=2)
         if self.x_log:
-            _log_x(ax)
+            pc.log_x(ax)
         if self.y_log:
             ax.set_yscale("log")
         ax.set_xlabel(self.xlabel or self.x + _condition_suffix(self.perf_condition))
@@ -716,28 +597,27 @@ def _condition_suffix(cond: dict) -> str:
     return f"  ({', '.join(f'{k}={v}' for k, v in cond.items())})" if cond else ""
 
 
-def resolve(name: str, specs: Mapping) -> object | None:
-    """A plot name → plot object: catalogue spec, registered plot, or a distribution of
-    the variable `name`; None if none of these."""
-    if name in specs:
-        return specs[name]
-    if name in PLOTS:
-        return PLOTS[name]()
-    if exists(name):
-        return Distribution(name)
-    return None
-
-
-def draw(pc: PlotContext, plots: list[object]) -> list[Path]:
-    """Draw plots in the context's style; write `pareto.csv` if any Pareto plot produced
-    points. A failing plot is logged and skipped."""
+def draw(pc: PlotContext, plots: list) -> list[Path]:
+    """Draw plot functions (saved under their name; skipped without data) and Pareto
+    plots; write `pareto.csv` if any Pareto plot produced points. A failing plot is
+    logged and skipped."""
     paths: list[Path] = []
     with plt.rc_context(pc.style.rc_params()):
         for p in plots:
+            name = p.info.name if hasattr(p, "info") else p.name
             try:
-                paths += p.draw(pc)
+                if not hasattr(p, "info"):
+                    paths += p.draw(pc)
+                    continue
+                fig = p(pc)
+                if fig is None or not any(ax.has_data() for ax in fig.axes):
+                    log.warning("plot %s: no data, skipped", name)
+                    if fig is not None:
+                        plt.close(fig)
+                    continue
+                paths += pc.save(fig, name)
             except Exception as e:  # a broken plot must not stop the others
-                log.warning("plot %s failed: %s", getattr(p, "name", p), e)
+                log.warning("plot %s failed: %s", name, e)
     if pc.pareto_rows:
         pd.DataFrame(pc.pareto_rows, columns=PARETO_COLUMNS).to_csv(
             pc.folder / "pareto.csv", index=False

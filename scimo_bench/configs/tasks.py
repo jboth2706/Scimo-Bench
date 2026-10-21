@@ -1,5 +1,7 @@
-"""Task configs (group `task`): what is scored on a dataset. Event list, variable
-parameters, binnings, metrics, the plots drawn by default, ranking and the quality gate.
+"""Task configs (group `task`): what is scored on a dataset. Event list, parameters of the
+comparisons, binnings, metrics, the plots drawn by default, ranking and the quality gate.
+A metric names a comparison (`jet_e_response`) or an observable with its side
+(`truth.jet_pt`, `reco.particle_pt`); so does its `x`.
 A task names its default dataset (`dataset=` overrides it). The event list is a file in
 this repo, versioned with the task."""
 
@@ -19,18 +21,18 @@ PFLOW_METRICS = [
     builds(
         Median,
         name="response_median",
-        variable="jet_energy_response",
+        variable="jet_e_response",
         better=dict(closest_to=1.0),
-        x="jet_truth_pt",
+        x="truth.jet_pt",
         binning=JET_PT,
         label="median jet energy response",
     ),
     builds(
         IQR,
         name="response_iqr",
-        variable="jet_energy_response",
+        variable="jet_e_response",
         better="lower",
-        x="jet_truth_pt",
+        x="truth.jet_pt",
         binning=JET_PT,
         label="IQR of jet energy response",
     ),
@@ -39,25 +41,25 @@ PFLOW_METRICS = [
         name="efficiency",
         variable="particle_matched",
         better="higher",
-        x="particle_truth_pt",
+        x="truth.particle_pt",
         binning=PARTICLE_PT,
-        label="particle efficiency",
+        label="particle efficiency (truth)",
     ),
     builds(
         FakeRate,
         name="fake_rate",
         variable="particle_fake",
         better="lower",
-        x="particle_pred_pt",
+        x="reco.particle_pt",
         binning=PARTICLE_PT,
-        label="particle fake rate",
+        label="particle fake rate (reco)",
     ),
     builds(
         Mean,
         name="multiplicity_diff_mean",
         variable="multiplicity_diff",
         better=dict(closest_to=0.0),
-        label=r"mean $N_\mathrm{pred} - N_\mathrm{truth}$",
+        label=r"mean $N_\mathrm{reco} - N_\mathrm{truth}$",
     ),
 ]
 
@@ -67,20 +69,18 @@ task_store(
         name="pflow",
         version=1,
         events="data/pflow_val_v1_events.txt",
-        # passed to the variables (ctx.param): collection scored, matching ΔR, EMD ΔR cap
-        params=dict(collection="particles", match_dr=0.05, emd_r=1.0),
+        collection="particles",  # the collection the cutflow table counts
+        # parameters of the comparisons (keyword arguments with the same name)
+        params=dict(match_dr=0.05, emd_r=1.0),
         binnings=dict(jet_pt="${linspace:0,200,11}", particle_pt="${logspace:0,2,9}"),
         metrics=PFLOW_METRICS,
-        # extra variables stored in per_event.parquet (for plots / later analysis)
-        variables=["jet_dr", "particle_pt_response", "particle_pred_eta"],
-        # plots drawn by default (names from the dataset's catalogue `plots.specs`, or any
-        # variable, drawn as a distribution)
+        # plots drawn by default (functions of the dataset's plots.py, or `ranking`)
         plots=[
-            "jet_energy_response",
-            "jet_pred_e",
-            "jet_pred_pt",
-            "n_pred",
-            "particle_pred_pt",
+            "jet_e_response",
+            "jet_e",
+            "jet_pt",
+            "n_particles",
+            "particle_pt",
             "event_emd",
             "response_vs_pt",
             "response_iqr_vs_pt",

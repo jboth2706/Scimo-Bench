@@ -17,7 +17,7 @@ from hydra.core.hydra_config import HydraConfig
 from hydra_zen import store
 from omegaconf import DictConfig, OmegaConf
 
-from scimo_bench import datasets, io, jobs, plotter, steps, variables
+from scimo_bench import io, jobs, plotter, steps
 from scimo_bench.configs import MODEL_STEPS, STEPS, load_models_file
 
 log = logging.getLogger("scimo_bench")
@@ -68,8 +68,10 @@ def check_config(cfg: DictConfig) -> None:
         raise ValueError("'truth' is reserved and cannot be a model name")
     if cfg.output.on_missing not in ("warn", "error"):
         raise ValueError("output.on_missing must be 'warn' or 'error'")
-    for name in cfg.task.get("variables") or []:
-        variables.get(name)
+    cat = steps.dataset_catalogue(cfg)
+    steps.task_metrics(cfg, cat)
+    steps.plot_objects(cfg, cat)
+    steps.check_params(cfg, cat)
     if "perf" in cfg.steps and cfg.perf is None:
         raise ValueError("step perf needs a perf config, e.g. perf=single")
     if "predict" in cfg.steps and not any(m.get("model") for m in cfg.models.values()):
@@ -87,13 +89,6 @@ def check_config(cfg: DictConfig) -> None:
         if mcfg.get("color") is not None:
             plotter.check_colour(mcfg.color, f"models.{name}.color")
     plotter.Style.from_cfg(OmegaConf.to_container(cfg.plots.style, resolve=True))
-    missing_vars = [n for n in steps.plot_names(cfg) if n not in cfg.plots.specs]
-    for name in missing_vars:
-        if not plotter.PLOTS.get(name) and not variables.exists(name):
-            raise ValueError(
-                f"plot '{name}' is not in the {cfg.dataset.name} catalogue (plots.specs), "
-                "not a plot kind and not a variable"
-            )
     jobs.check_site(cfg.site)
 
 
@@ -174,8 +169,7 @@ def run(cfg: DictConfig, folder: Path) -> None:
 
 @hydra.main(config_path=None, config_name="scimo_bench", version_base="1.3")
 def bench(cfg: DictConfig) -> None:
-    """Hydra entry: activate the dataset, check the config, run or submit."""
-    datasets.activate(cfg.dataset.variables)
+    """Hydra entry: check the config, run or submit."""
     check_config(cfg)
     to_submit = jobs.should_submit(cfg.site, cfg.steps)
     if not to_submit:
