@@ -21,6 +21,7 @@ hydra-zen = ">=0.12"
 pot = ">=0.9"
 pytest = ">=8.0,<9"
 ruff = ">=0.5"
+pre-commit = ">=4.3.0,<5"
 
 [tasks]
 test = { cmd = "pytest", env = { OPENBLAS_NUM_THREADS = "1", OMP_NUM_THREADS = "1" } }
@@ -28,6 +29,7 @@ test = { cmd = "pytest", env = { OPENBLAS_NUM_THREADS = "1", OMP_NUM_THREADS = "
 test-job = { cmd = "python -m scimo_bench.jobs {{ site }} -- pytest", args = ["site"] }
 lint = "ruff check . && ruff format --check ."
 fmt = "ruff format . && ruff check --fix ."
+precommit = "pre-commit run --all-files"
 
 # Perf path (M6): torch + the producers' model code, only for adapters (stage=perf).
 # Versions follow hep4m_scimo's environment; its packages are editable sibling checkouts.
