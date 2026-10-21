@@ -31,7 +31,7 @@ def test_real_events_end_to_end(tmp_path):
         f"models.dummy.predictions={tmp_path / 'ident'}",
         f"models.second.predictions={tmp_path / 'shift'}",
         f"task.events={events}",
-        "cutflow=central",
+        "cutflow=preselection",
         f"output.dir={out}",
         "output.bootstrap.n=100",
     )

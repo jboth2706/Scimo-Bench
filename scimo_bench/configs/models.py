@@ -20,7 +20,7 @@ ARGMAX = dict(mode="argmax", multiplicity="model", seed=0)
 FIELDS = dict(
     label=None,  # name in plots; default: the model's name
     family=None,  # token_ar | masked | discrete_diffusion | continuous | regression
-    predictions=None,  # default: ${paths.preds}/<task>/<name>
+    predictions=None,  # default: <run folder>/predictions/<name>
     generation={},
     model=None,  # protocol class "package.module:Class"
     checkpoint=None,
@@ -34,7 +34,7 @@ FIELDS = dict(
 TYPES = {
     "files": {},  # predictions handed in as files
     "nanohep": dict(
-        family="token_ar", model="hep4m_scimo.bench:NanoHEP", generation=ARGMAX, env="perf"
+        family="token_ar", model="examples.nanohep_model:NanoHEP", generation=ARGMAX, env="perf"
     ),
 }
 
@@ -56,7 +56,7 @@ def add_model(name: str, type: str = "files", **fields) -> None:
         raise TypeError(f"model {name}: unknown fields {sorted(unknown)}; known: {list(FIELDS)}")
     conf = {**FIELDS, **TYPES[type], **fields}
     conf["label"] = conf["label"] or name
-    conf["predictions"] = conf["predictions"] or f"${{paths.preds}}/${{task.name}}/{name}"
+    conf["predictions"] = conf["predictions"] or f"${{output.dir}}/predictions/{name}"
     conf["generation"] = dict(conf["generation"])
     model_store(
         make_config(name=name, type=type, **conf, zen_dataclass={"cls_name": f"Model_{name}"}),

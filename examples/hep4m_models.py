@@ -2,7 +2,7 @@
 
 Copy it somewhere of your own and pass it with `models_file=<path>`:
 
-    ./run.sh site=raven models_file=examples/hep4m_models.py task=pflow \
+    ./run.sh site=raven run=n6_sweep models_file=examples/hep4m_models.py task=pflow \
         'models=[nanohep_n6_adamw,nanohep_n6_muon]' steps=[predict,perf,score,plot] perf=single
 """
 

@@ -1,7 +1,8 @@
 """hydra-zen config store. Importing this package fills the store.
 
-Set per call: `site` (where it runs, and the default `paths`), `task` (which brings its
-default `dataset`), `models` (from your own `models_file`), `steps`. Everything else has
+Set per call: `run` (the run's name: its folder is `<paths.outputs>/<run>`), `site` (where
+it runs, and the default `paths`), `task` (which brings its default `dataset`), `models`
+(from your own `models_file`), `steps`. Everything else has
 defaults that any override can change.
 """
 
@@ -54,6 +55,8 @@ BenchConfig = make_config(
         {"override hydra/job_logging": "none"},
         {"override hydra/hydra_logging": "none"},
     ],
+    run=MISSING,  # the run's name (required): its folder is <paths.outputs>/<run>
+    force=False,  # --force: overwrite an existing run (its predictions/ are kept)
     task=None,
     dataset=None,  # set by the task's default (e.g. cocoa); `dataset=<name>` overrides
     models={},
@@ -63,10 +66,9 @@ BenchConfig = make_config(
     runtime=None,
     perf=None,
     site=None,
-    # data root, prediction files, run folders, job code snapshots; defaults from the site
+    # data root, run folders, job code snapshots; defaults from the site
     paths=dict(
         data="${site.paths.data}",
-        preds="${site.paths.preds}",
         outputs="${site.paths.outputs}",
         snapshots="${site.paths.snapshots}",
     ),

@@ -16,7 +16,7 @@ def step(cut: str, value: float, on: str, collection: str = "particles"):
 
 cutflow_store(
     make_config(
-        name="central",
+        name="preselection",
         steps=[
             # acceptance on both sides: each particle cut on its own |eta| / pT
             step("max_abs_eta", 2.5, on="both"),
@@ -25,5 +25,5 @@ cutflow_store(
             step("min_particles", 1, on="truth"),
         ],
     ),
-    name="central",
+    name="preselection",
 )

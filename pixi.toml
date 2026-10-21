@@ -55,6 +55,10 @@ pytorch = "2.9.*"
 [feature.perf.pypi-dependencies]
 hep4m-scimo = { path = "../scimo", editable = true }
 scimo = { path = "../scimo-framework", editable = true }
+# nanoHEP repo: its `hep4m` package decodes VQ-VAE codes to physics (examples/nanohep_model.py)
+nanohep = { path = "../nanoHEP", editable = true }
+vector-quantize-pytorch = "==1.25.2"
+einops = ">=0.8"
 
 [environments]
 perf = ["perf"]

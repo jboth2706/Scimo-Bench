@@ -1,13 +1,18 @@
 """Entry point: load the user's models file, compose the config, then run the steps
 in-process or submit them as jobs of the selected site.
 
-    ./run.sh site=raven models_file=~/bench_models.py task=pflow 'models=[a,b]' \
-        steps=[predict,perf,score,plot] perf=single
+    ./run.sh site=raven run=depth_sweep models_file=~/bench_models.py task=pflow \
+        'models=[a,b]' steps=[predict,perf,score,plot] perf=single
+
+Every call names its run (`run=<name>`); everything goes into `<paths.outputs>/<name>/`.
+A call with `predict` or `score` into an existing run is refused unless `--force` is given
+(it empties the run folder, keeping `predictions/`).
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -24,6 +29,9 @@ log = logging.getLogger("scimo_bench")
 
 RUN_LOG = "run.log"
 MODELS_FILE = "models_file.py"  # the user's models file, copied into job snapshots
+PREDICTIONS = "predictions"  # kept by --force: the models' outputs of the run
+FORCE_FLAG = "--force"
+RUN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class WarningCounter(logging.Handler):
@@ -61,6 +69,10 @@ def ordered(names) -> list[str]:
 
 def check_config(cfg: DictConfig) -> None:
     """Configuration errors stop the run; everything else only warns."""
+    if OmegaConf.is_missing(cfg, "run"):
+        raise ValueError("name the run: run=<name> (its folder is <paths.outputs>/<name>)")
+    if not RUN_NAME.match(str(cfg.run)):
+        raise ValueError(f"run name {cfg.run!r}: use letters, digits, '.', '_', '-' only")
     unknown = [s for s in cfg.steps if s not in STEPS]
     if unknown or not cfg.steps:
         raise ValueError(f"steps must be a non-empty list of {list(STEPS)}, got {list(cfg.steps)}")
@@ -93,18 +105,36 @@ def check_config(cfg: DictConfig) -> None:
 
 
 def run_dir(cfg: DictConfig) -> Path:
-    """The run folder: new for `predict`/`score`; otherwise (`perf`, `plot`) `output.dir`
-    if it holds a report, else the latest run of the task that does."""
-    folder = io.resolve_path(cfg.output.dir)
-    if {"predict", "score"} & set(cfg.steps) or (folder / steps.REPORT).exists():
-        return folder.resolve()
-    task_root = io.resolve_path(cfg.paths.outputs) / cfg.task.name
-    runs = sorted(p.parent for p in task_root.glob(f"*/{steps.REPORT}"))
-    if not runs:
+    """The run folder `output.dir` (default `<paths.outputs>/<run>`); `steps=[plot]` needs
+    a scored run there."""
+    folder = io.resolve_path(cfg.output.dir).resolve()
+    if set(cfg.steps) == {"plot"} and not (folder / steps.REPORT).exists():
         raise FileNotFoundError(
-            f"steps {list(cfg.steps)} need a scored run first: no {steps.REPORT} under {task_root}"
+            f"run '{cfg.run}' has no {steps.REPORT} in {folder}: score it first (steps=[score])"
         )
-    return runs[-1].resolve()
+    return folder
+
+
+def prepare_run_dir(cfg: DictConfig, folder: Path) -> None:
+    """A call with `predict` or `score` starts its run: an existing run folder is an
+    error, unless `force` (--force), which empties it but keeps `predictions/`. Jobs skip
+    this: the call that submitted them did it."""
+    if jobs.in_job() or not {"predict", "score"} & set(cfg.steps):
+        return
+    if not folder.exists() or not any(folder.iterdir()):
+        return
+    if not cfg.force:
+        raise FileExistsError(
+            f"run '{cfg.run}' exists: {folder}; choose another run=<name>, or overwrite it "
+            f"with {FORCE_FLAG} (its {PREDICTIONS}/ are kept)"
+        )
+    for p in folder.iterdir():
+        if p.name == PREDICTIONS:
+            continue
+        if p.is_dir():
+            shutil.rmtree(p)
+        else:
+            p.unlink()
 
 
 def job_groups(cfg: DictConfig) -> list[tuple[list[str], str, str]]:
@@ -125,7 +155,7 @@ def job_groups(cfg: DictConfig) -> list[tuple[list[str], str, str]]:
 
 def job_overrides(cfg: DictConfig, folder: Path, todo: list[str], models_file: Path | None):
     """This call's overrides for a job: same choices, fixed folder, the job's steps."""
-    fixed = ("output.dir", "steps", "models_file")
+    fixed = ("output.dir", "steps", "models_file", "force")
     keep = [
         o for o in HydraConfig.get().overrides.task if o.lstrip("+~").split("=")[0] not in fixed
     ]
@@ -175,6 +205,7 @@ def bench(cfg: DictConfig) -> None:
     if not to_submit:
         jobs.guard(cfg.site, cfg.steps)
     folder = run_dir(cfg)
+    prepare_run_dir(cfg, folder)
     folder.mkdir(parents=True, exist_ok=True)
     counter = setup_logging(folder)
     log.info("scimo_bench steps=%s commit=%s", list(cfg.steps), jobs.git_commit())
@@ -199,7 +230,10 @@ def models_file_arg(argv: list[str]) -> str | None:
 
 
 def main() -> None:
-    """The user's models must be in the store before Hydra composes the config."""
+    """`--force` becomes the override `force=true`; the user's models must be in the store
+    before Hydra composes the config."""
+    if FORCE_FLAG in sys.argv[1:]:
+        sys.argv = [a for a in sys.argv if a != FORCE_FLAG] + ["force=true"]
     path = models_file_arg(sys.argv[1:])
     if path is not None:
         load_models_file(path)

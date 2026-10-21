@@ -34,7 +34,7 @@ site_store(
     site_conf(
         "local",
         "local",
-        paths=dict(data=None, preds="outputs/preds", outputs="outputs", snapshots=None),
+        paths=dict(data=None, outputs="outputs", snapshots=None),
     ),
     name="local",
 )
@@ -46,7 +46,6 @@ site_store(
         "slurm",
         paths=dict(
             data=PTMP,
-            preds=f"{PTMP}/bench/preds",
             outputs=f"{PTMP}/bench/outputs",
             snapshots=f"{PTMP}/bench/snapshots",
         ),

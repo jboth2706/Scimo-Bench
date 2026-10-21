@@ -989,8 +989,13 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/uproot-5.7.7-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/virtualenv-21.14.12-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.1-pyh5ded981_0.conda
+      - pypi: ../nanoHEP
       - pypi: ../scimo
       - pypi: ../scimo-framework
+      - pypi: https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/38/74/f94141b38a51a553efef7f510fc213894161ae49b88bffd037f8d2a7cb2f/frozendict-2.4.7-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/47/98/eb64e62b2fc7413ce2567c5d0b1eb0618997a5f2b03e53a1d94a4a3623f0/vector_quantize_pytorch-1.25.2-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/d0/28/6768d342b2b888f9facdddbd430daf015cab936e2598281ab436b1be1b4a/einx-0.4.3-py3-none-any.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/antlr-python-runtime-4.9.3-pyhd8ed1ab_1.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/awkward-2.14.0-pyh5ded981_0.conda
@@ -1205,8 +1210,13 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-1.3.2-h8088a28_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
+      - pypi: ../nanoHEP
       - pypi: ../scimo
       - pypi: ../scimo-framework
+      - pypi: https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/38/74/f94141b38a51a553efef7f510fc213894161ae49b88bffd037f8d2a7cb2f/frozendict-2.4.7-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/47/98/eb64e62b2fc7413ce2567c5d0b1eb0618997a5f2b03e53a1d94a4a3623f0/vector_quantize_pytorch-1.25.2-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/d0/28/6768d342b2b888f9facdddbd430daf015cab936e2598281ab436b1be1b4a/einx-0.4.3-py3-none-any.whl
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -9667,6 +9677,9 @@ packages:
     - zstd >=1.5.7,<1.6.0a0
   size: 433687
   timestamp: 1786599629846
+- pypi: ../nanoHEP
+  name: nanohep
+  requires_python: '>=3.10'
 - pypi: ../scimo
   name: hep4m-scimo
   requires_python: '>=3.11'
@@ -9678,3 +9691,35 @@ packages:
   - wandb>=0.22 ; extra == 'training'
   - scimo[training] ; extra == 'all'
   requires_python: '>=3.11'
+- pypi: https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl
+  name: einops
+  version: 0.8.2
+  sha256: 54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193
+  requires_python: '>=3.9'
+- pypi: https://files.pythonhosted.org/packages/38/74/f94141b38a51a553efef7f510fc213894161ae49b88bffd037f8d2a7cb2f/frozendict-2.4.7-py3-none-any.whl
+  name: frozendict
+  version: 2.4.7
+  sha256: 972af65924ea25cf5b4d9326d549e69a9a4918d8a76a9d3a7cd174d98b237550
+  requires_python: '>=3.6'
+- pypi: https://files.pythonhosted.org/packages/47/98/eb64e62b2fc7413ce2567c5d0b1eb0618997a5f2b03e53a1d94a4a3623f0/vector_quantize_pytorch-1.25.2-py3-none-any.whl
+  name: vector-quantize-pytorch
+  version: 1.25.2
+  sha256: 6b5026b4f9717bbe19d6c4313e6d8b5b1907bf745b2b08896bfa592459f5651a
+  requires_dist:
+  - einops>=0.8.0
+  - einx>=0.3.0
+  - torch>=2.0
+  - torchvision ; extra == 'examples'
+  - tqdm ; extra == 'examples'
+  requires_python: '>=3.9'
+- pypi: https://files.pythonhosted.org/packages/d0/28/6768d342b2b888f9facdddbd430daf015cab936e2598281ab436b1be1b4a/einx-0.4.3-py3-none-any.whl
+  name: einx
+  version: 0.4.3
+  sha256: 47ce54a0144f6dffcfacdd8fe2cc9e2e5e6485dda2471330ab75ee747dd22f39
+  requires_dist:
+  - numpy
+  - sympy
+  - frozendict
+  - torch>=2.2 ; extra == 'torch'
+  - mlx ; extra == 'mlx'
+  requires_python: '>=3.10'

@@ -40,16 +40,16 @@ def test_several_models_in_order():
     c = cfg("task=pflow", "models=[nano,dummy]")
     assert list(c.models) == ["nano", "dummy"]
     assert c.models.nano.family == "token_ar" and c.models.nano.env == "perf"
-    assert c.models.nano.model == "hep4m_scimo.bench:NanoHEP"
+    assert c.models.nano.model == "examples.nanohep_model:NanoHEP"
     assert c.models.nano.generation.mode == "argmax"
     assert c.models.dummy.model is None and c.models.dummy.label == "dummy"
 
 
 def test_paths_come_from_the_site(monkeypatch):
     monkeypatch.setenv("USER", "someone")
-    c = cfg("task=pflow", "models=[dummy]", "site=raven")
-    assert c.paths.preds == "/ptmp/someone/bench/preds"
-    assert c.models.dummy.predictions == "/ptmp/someone/bench/preds/pflow/dummy"
+    c = cfg("task=pflow", "models=[dummy]", "site=raven", "run=sweep")
+    assert c.output.dir == "/ptmp/someone/bench/outputs/sweep"
+    assert c.models.dummy.predictions == "/ptmp/someone/bench/outputs/sweep/predictions/dummy"
     assert c.dataset.name == "cocoa" and c.dataset.truth.path.startswith("/ptmp/someone/COCOA/")
     c = cfg("task=pflow", "site=raven", "paths.data=/elsewhere")
     assert c.dataset.truth.path.startswith("/elsewhere/COCOA/")
@@ -79,7 +79,7 @@ def test_misspelled_builds_argument_fails_at_compose_time():
 
 
 def test_task_metrics_and_plots_instantiate():
-    c = cfg("task=pflow", "cutflow=central", "plots=pareto")
+    c = cfg("task=pflow", "cutflow=preselection", "plots=pareto")
     cat = bench_steps.dataset_catalogue(c)
     metrics = bench_steps.task_metrics(c, cat)
     assert all(isinstance(m, Metric) for m in metrics)

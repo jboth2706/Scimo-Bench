@@ -37,8 +37,11 @@ def contract_dir(tmp_path_factory, truth):
     return d
 
 
-def run_bench(*overrides, check=True, env=None):
-    """Run `python -m scimo_bench` from the repo root; returns the CompletedProcess."""
+def run_bench(*overrides, check=True, env=None, run="test"):
+    """Run `python -m scimo_bench` from the repo root (with `run=<run>` unless given or
+    `run=None`); returns the CompletedProcess."""
+    if run is not None and not any(o.startswith("run=") for o in overrides):
+        overrides = (*overrides, f"run={run}")
     proc = subprocess.run(
         [sys.executable, "-m", "scimo_bench", *overrides],
         cwd=REPO_ROOT,

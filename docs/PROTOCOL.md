@@ -92,7 +92,7 @@ add_model(
 your package and its dependencies (`perf` contains torch and hep4m_scimo).
 
 ```bash
-./run.sh site=raven models_file=~/my_models.py task=pflow 'models=[my_model]' \
+./run.sh site=raven run=my_first_run models_file=~/my_models.py task=pflow 'models=[my_model]' \
     steps=[predict,perf,score,plot] perf=single
 ```
 

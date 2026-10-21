@@ -44,32 +44,38 @@ add_model(
     checkpoint="/ptmp/me/runs/<run>/checkpoints/final.ckpt",
 )
 # prediction files made elsewhere; only scored
-add_model("hgpflow", family="regression", predictions="/ptmp/me/bench/preds/hgpflow")
+add_model("hgpflow", family="regression", predictions="/ptmp/me/hgpflow_preds")
 ```
 
-**3. Run.** From anywhere (`run.sh` lives in the repo):
+**3. Run.** From anywhere (`run.sh` lives in the repo). Every call names its run
+(`run=<name>`); everything of the run, predictions included, goes into
+`<paths.outputs>/<name>/` (on Raven `/ptmp/$USER/bench/outputs/<name>/`):
 
 ```bash
 # run the models, time them, score them, plot (on Raven: a GPU job, then a CPU job)
-./run.sh site=raven models_file=~/bench_models.py task=pflow \
-    'models=[n6_muon,hgpflow]' steps=[predict,perf,score,plot] perf=single cutflow=central
+./run.sh site=raven run=n6_vs_hgpflow models_file=~/bench_models.py task=pflow \
+    'models=[n6_muon,hgpflow]' steps=[predict,perf,score,plot] perf=single cutflow=preselection
 
-# only score and plot prediction files that exist (the default steps)
-./run.sh site=raven models_file=~/bench_models.py task=pflow 'models=[n6_muon,hgpflow]'
+# score the same run again (e.g. after adding a variable): the predictions are kept
+./run.sh site=raven run=n6_vs_hgpflow models_file=~/bench_models.py task=pflow \
+    'models=[n6_muon,hgpflow]' cutflow=preselection --force
 
 # redraw, with quality-vs-cost plots (runs right where you call it)
-./run.sh site=raven models_file=~/bench_models.py task=pflow 'models=[n6_muon,hgpflow]' \
-    steps=[plot] plots=pareto output.dir=<run folder>
+./run.sh site=raven run=n6_vs_hgpflow models_file=~/bench_models.py task=pflow \
+    'models=[n6_muon,hgpflow]' steps=[plot] plots=pareto
 ```
 
-**4. Look at the results.** The call prints the run folder
-(`<paths.outputs>/<task>/<time>/`):
+A call with `predict` or `score` into a run that exists is refused; `--force` empties the run
+folder first but keeps its `predictions/`. `steps=[plot]` and `steps=[perf]` work on an
+existing run.
+
+**4. Look at the results**:
 
 ```bash
-squeue --me                                   # the jobs
-tail -f <run folder>/job-*.out                # their logs
-column -s, -t < <run folder>/rankings.csv     # ranks per metric
-ls <run folder>/plots                         # PNG + PDF
+squeue --me                                                    # the jobs
+tail -f /ptmp/$USER/bench/outputs/n6_vs_hgpflow/job-*.out      # their logs
+column -s, -t < /ptmp/$USER/bench/outputs/n6_vs_hgpflow/rankings.csv
+ls /ptmp/$USER/bench/outputs/n6_vs_hgpflow/plots               # PNG + PDF
 ```
 
 ---
@@ -107,7 +113,7 @@ A call runs some of four steps, always in this order (`steps=[...]`, default
 
 | Step | Does | Writes |
 |------|------|--------|
-| `predict` | loads each model with a class once, runs it over the task's events | `<paths.preds>/<task>/<model>/` (Parquet + `meta.json`) |
+| `predict` | loads each model with a class once, runs it over the task's events | `<run>/predictions/<model>/` (Parquet + `meta.json`) |
 | `perf` | times the same loaded model (scenarios `single`, `offline`) | `perf.csv`, `perf_meta_<perf>.json` |
 | `score` | reads truth and prediction files, cuts, computes observables, comparisons and metrics | `report.csv`, `rankings.csv`, `cutflow.csv`, `per_event.parquet`, `models.csv` |
 | `plot` | draws from those files (no physics) | `plots/`, `pareto.csv` |
@@ -122,7 +128,7 @@ gate (`pflow`: jet-energy-response IQR ≤ 0.25); otherwise they are marked `inv
 | `local` (default) | everything in-process (laptop, or inside an `salloc` shell) |
 | `raven` | `predict`/`perf` as one job on the runtime's device (1× A100), then `score`/`plot` as a CPU job that starts only if the first succeeded; the call returns at once (`site.wait=true` blocks) |
 
-Before submitting, the call fixes the run folder and copies the code and your models file
+Before submitting, the call prepares the run folder and copies the code and your models file
 to a snapshot, so later edits do not change queued jobs. Job scripts, Slurm logs and job ids
 (`jobs.csv`) land in the run folder. On a login node of a known cluster, every step except
 `plot` is refused unless you pass the site ("add site=raven").
@@ -135,10 +141,11 @@ to a snapshot, so later edits do not change queued jobs. Job scripts, Slurm logs
 
 | Setting | Meaning | Default |
 |---------|---------|---------|
+| `run=` | the run's name: its folder is `<paths.outputs>/<name>/` | required |
+| `--force` | overwrite an existing run (its `predictions/` are kept) | off |
 | `site=` | `local` or `raven` | `local` |
 | `paths.data` | data root; the dataset's truth file is found below it | raven: `/ptmp/$USER`; local: none |
-| `paths.preds` | prediction files, `<preds>/<task>/<model>/` | raven: `/ptmp/$USER/bench/preds`; local: `outputs/preds` |
-| `paths.outputs` | run folders, `<outputs>/<task>/<time>/` | raven: `/ptmp/$USER/bench/outputs`; local: `outputs` |
+| `paths.outputs` | where the run folders are | raven: `/ptmp/$USER/bench/outputs`; local: `outputs` |
 | `paths.snapshots` | code copies for jobs | raven: `/ptmp/$USER/bench/snapshots` |
 | `models_file=` | your file of `add_model(...)` lines | none |
 | `models=[a,b]` | which of your models | none |
@@ -147,9 +154,8 @@ to a snapshot, so later edits do not change queued jobs. Job scripts, Slurm logs
 | `dataset=` | eval dataset: `cocoa` | the task's |
 | `runtime=` | how models run: `gpu` (cuda, bf16, compiled, batch 256) or `cpu` | `gpu` |
 | `perf=` | `single` (latency), `offline` (throughput), `both`, `smoke` (code check) | none |
-| `cutflow=` | cuts applied to every model, each on truth, reco or both: `central` | none |
+| `cutflow=` | cuts applied to every model, each on truth, reco or both: `preselection` | none |
 | `plots=` | `default`, or `pareto` (adds quality vs cost) | `default` |
-| `output.dir=` | an existing run folder (for `steps=[plot]` / `[perf]`) | new folder; latest run for plot/perf |
 
 Any value can be overridden, e.g. `paths.data=/elsewhere`,
 `models.n6_muon.checkpoint=<file>`, `output.bootstrap.n=200`. The settings used are saved as
@@ -160,14 +166,19 @@ Any value can be overridden, e.g. `paths.data=/elsewhere`,
 
 `add_model(name, type=..., **fields)` with fields `label, family, predictions, generation,
 model, checkpoint, options, env, color, linestyle` (`scimo_bench/configs/models.py`); a
-typo is an error. A type gives defaults: `files` (only a prediction file) or `nanohep`
-(protocol class `hep4m_scimo.bench:NanoHEP`, argmax generation, env `perf`); `add_type(...)`
+typo is an error. `predictions` defaults to `<run>/predictions/<model>`; point it at another
+run's folder (`predictions=/ptmp/$USER/bench/outputs/<other run>/predictions/<model>`) to
+score predictions made before without rerunning the model. A type gives defaults: `files` (only a prediction file) or `nanohep`
+(protocol class `examples.nanohep_model:NanoHEP`, argmax generation, env `perf`); `add_type(...)`
 adds one.
 
 ### The run folder
 
+`<paths.outputs>/<run>/`:
+
 | File | Holds |
 |------|-------|
+| `predictions/<model>/` | each model's predictions (Parquet + `meta.json`, `docs/CONTRACT.md`) |
 | `report.csv` | every metric per model and bin: value, 95 % interval, status; gated perf rows |
 | `rankings.csv` | rank per metric, mean rank, primary metric |
 | `cutflow.csv` | events and objects kept after each step, per model |
@@ -324,26 +335,26 @@ model. Every step states **which side it cuts** with `on`:
 - Cutting one side only changes what the metrics mean: with `min_pt` on `truth` only, a
   reco particle below the threshold has no truth partner left and counts as a fake.
 
-The cutflow `central` (`scimo_bench/configs/cutflows.py`):
+The cutflow `preselection` (`scimo_bench/configs/cutflows.py`):
 
 ```python
 cutflow_store(
     make_config(
-        name="central",
+        name="preselection",
         steps=[
             step("max_abs_eta", 2.5, on="both"),
             step("min_pt", 1.0, on="both"),
             step("min_particles", 1, on="truth"),
         ],
     ),
-    name="central",
+    name="preselection",
 )
 ```
 
 A step cuts the collection `particles` unless it says otherwise
 (`step("min_pt", 2.0, on="truth", collection="tracks")`). Add a cutflow the same way (one
 `cutflow_store(...)` with a new name, then `cutflow=<name>`), or change one on the command
-line: `cutflow=central cutflow.steps.1.value=2.0 cutflow.steps.1.on=truth`.
+line: `cutflow=preselection cutflow.steps.1.value=2.0 cutflow.steps.1.on=truth`.
 
 A new kind of cut: a function `(objects, value) -> keep mask` in `scimo_bench/cutflow.py`;
 `objects` is the step's collection, the mask is per object or (`level="event"`) per event:
@@ -433,7 +444,7 @@ scimo-bench/
 | `models` | from your models file | yours |
 | `runtime` | device, precision, compile, batch size for model code | `gpu`, `cpu` |
 | `perf` | scenarios, batch sizes, warmup, repeats | `single`, `offline`, `both`, `smoke` |
-| `cutflow` | cuts applied to every model | `central` |
+| `cutflow` | cuts applied to every model | `preselection` |
 | `plots` (+ `plots/pareto`) | which plots, style, Pareto plot | `default`, `pareto` |
 | `output` | run folder, bootstrap size, warn or stop on gaps | `default` |
 

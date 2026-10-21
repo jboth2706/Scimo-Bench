@@ -85,10 +85,10 @@ pixi run test                     # all tests (in-process; `pixi run test-job ra
 pixi run lint                     # ruff check + format check
 pixi run precommit                # all pre-commit hooks (ruff, yamlfix, yamllint), as on commit
 # models come from the user's models file (example: examples/hep4m_models.py)
-./run.sh site=raven models_file=<file> task=pflow 'models=[a,b]' cutflow=central   # score + plot (CPU job)
-./run.sh site=raven models_file=<file> task=pflow 'models=[a,b]' \
+./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' cutflow=preselection  # score+plot
+./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' \
     steps=[predict,perf,score,plot] perf=single                # GPU job, then CPU job
-./run.sh site=raven models_file=<file> task=pflow 'models=[a,b]' steps=[plot] plots=pareto   # inline
+./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' steps=[plot] plots=pareto
 ```
 
 ## Cluster rules (Raven, MPCDF)

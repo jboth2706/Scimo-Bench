@@ -58,8 +58,8 @@ class Runtime:
         r = cls(**{k: cfg[k] for k in cls.__dataclass_fields__ if k in cfg})
         if is_cuda(r.device) and (torch is None or not torch.cuda.is_available()):
             raise RuntimeError(
-                f"runtime={r.name} needs torch with CUDA (a GPU job in an env with torch); "
-                "use runtime=cpu otherwise"
+                f"runtime={r.name} needs torch with CUDA: on a GPU node, in the models' env "
+                "(locally: SCIMO_BENCH_ENV=perf ./run.sh ...); or use runtime=cpu"
             )
         return r
 

@@ -8,7 +8,7 @@ a third draws the Pareto front of physics against cost. First models: nanoHEP n6
 n6 Muon from the multi-epoch sweep; afterwards the depth scaling n5–n8.
 
 ```bash
-./run.sh task=pflow 'models=[nanohep_n6_adamw,nanohep_n6_muon]' cutflow=central
+./run.sh task=pflow 'models=[nanohep_n6_adamw,nanohep_n6_muon]' cutflow=preselection
 ./run.sh task=pflow 'models=[nanohep_n6_adamw,nanohep_n6_muon]' stage=perf perf=single_a100
 ./run.sh task=pflow 'models=[nanohep_n6_adamw,nanohep_n6_muon]' stage=plot plots=pareto
 ```

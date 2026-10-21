@@ -48,10 +48,10 @@ Set per call (everything else has defaults):
 | What | How |
 |------|-----|
 | where it runs, and default paths | `site=local` (in-process) / `site=raven` (Slurm jobs) |
-| data root, prediction files, run folders, snapshots | `paths.data`, `paths.preds`, `paths.outputs`, `paths.snapshots` (defaults from the site) |
+| run name, data root, run folders, snapshots | `run=<name>` (required; folder `<paths.outputs>/<name>`, predictions in `predictions/`), `paths.data`, `paths.outputs`, `paths.snapshots` (defaults from the site) |
 | which models | `models_file=<your file>` + `'models=[a,b]'` |
 | what to do | `steps=[predict,perf,score,plot]` |
-| task, cuts, plots | `task=pflow`, `cutflow=central`, `plots=default|pareto` |
+| task, cuts, plots | `task=pflow`, `cutflow=preselection`, `plots=default|pareto` |
 | how models run | `runtime=gpu|cpu` (device, precision, compile, batch size), `perf=single|offline|both|smoke` |
 
 Models live in the user's models file, not in this repo:
@@ -65,7 +65,7 @@ add_model("hgpflow", family="regression", predictions="/ptmp/.../hgpflow")  # fi
 
 A type (`files`, `nanohep`, or one added with `add_type`) gives defaults for the fields
 `label, family, predictions, generation, model, checkpoint, options, env`. `predictions`
-defaults to `${paths.preds}/<task>/<name>`. Each model is stored under its own package
+defaults to `${output.dir}/predictions/<name>` (inside the run folder). Each model is stored under its own package
 `models.<name>`, so `models=[a,b]` merges them side by side.
 
 Datasets (`configs/datasets.py`, group `dataset`) name the truth reader (`builds` of a class
@@ -82,7 +82,8 @@ Resolvers `linspace`, `logspace` are registered when `scimo_bench.configs` is im
 ## Outputs
 
 ```
-outputs/<task>/<YYYY-MM-DD_HH-MM-SS>/
+<paths.outputs>/<run>/      # run=<name> (required); predict/score into an existing run: --force
+├── predictions/<model>/    # contract-v1 Parquet + meta.json (kept by --force)
 ├── resolved_config.yaml
 ├── run.log                 # git commit, input paths and sizes, warnings
 ├── report.csv              # model, metric, bin_low, bin_high, value, lower, upper, status,

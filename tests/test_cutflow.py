@@ -34,7 +34,7 @@ def test_object_and_event_cuts(truth):
     assert ev["truth"] == ev["a"] == ev["b"] == (n_after >= 2).sum()
 
 
-def test_central_cutflow_counts_equal_for_models(truth):
+def test_preselection_counts_equal_for_models(truth):
     j = io.join(truth, {"x": synthetic.identical(truth), "y": synthetic.shifted(truth, 0.5)})
     out = cutflow.apply(j, CENTRAL)
     df = cutflow.to_frame(out.cutflow)

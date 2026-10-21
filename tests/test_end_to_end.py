@@ -23,7 +23,7 @@ def digest(folder):
 @pytest.fixture(scope="module")
 def quality_run(contract_dir, tmp_path_factory):
     out = tmp_path_factory.mktemp("e2e") / "run"
-    run_bench(*synthetic_overrides(contract_dir, out), "cutflow=central")
+    run_bench(*synthetic_overrides(contract_dir, out), "cutflow=preselection")
     return out
 
 
@@ -88,7 +88,7 @@ def test_redraw_gives_identical_files(quality_run):
 
 def test_same_seed_same_report(contract_dir, tmp_path, quality_run):
     out = tmp_path / "again"
-    run_bench(*synthetic_overrides(contract_dir, out), "cutflow=central", "steps=[score]")
+    run_bench(*synthetic_overrides(contract_dir, out), "cutflow=preselection", "steps=[score]")
     a = (quality_run / "report.csv").read_bytes()
     assert (out / "report.csv").read_bytes() == a
     assert not (out / "plots").exists()
@@ -142,15 +142,29 @@ def test_perf_and_pareto(contract_dir, tmp_path):
     assert (out / "plots" / "pareto_emd_vs_flops.png").exists()
 
 
-def test_perf_finds_latest_run(contract_dir, tmp_path):
-    """Without output.dir, steps perf/plot use the latest run of the task under paths.outputs."""
+def test_named_run_folder_and_force(contract_dir, tmp_path):
+    """A run is a named folder under paths.outputs; scoring into an existing run needs
+    --force, which keeps its predictions/; plot-only calls reuse the run."""
     root = tmp_path / "outputs"
     ov = [o for o in synthetic_overrides(contract_dir, root) if not o.startswith("output.dir")]
-    run_bench(*ov, f"paths.outputs={root}", "steps=[score]")
-    proc = run_bench(*ov, f"paths.outputs={root}", "steps=[plot]")
-    runs = list((root / "pflow").iterdir())
-    assert len(runs) == 1 and (runs[0] / "plots").exists()
-    assert "output:" in proc.stderr
+    ov.append(f"paths.outputs={root}")
+    run_bench(*ov, "steps=[score]", run="sweep")
+    run = root / "sweep"
+    assert (run / "report.csv").exists()
+    (run / "predictions").mkdir()
+    (run / "predictions" / "keep.txt").write_text("x")
+    proc = run_bench(*ov, "steps=[score]", run="sweep", check=False)
+    assert proc.returncode != 0 and "--force" in proc.stderr
+    run_bench(*ov, "steps=[plot]", run="sweep")  # plot-only: the run is reused
+    assert (run / "plots").exists()
+    run_bench(*ov, "steps=[score]", "--force", run="sweep")
+    assert (run / "predictions" / "keep.txt").exists() and not (run / "plots").exists()
+    proc = run_bench(*ov, "steps=[plot]", run="nope", check=False)
+    assert proc.returncode != 0 and "score it first" in proc.stderr
+    proc = run_bench(*ov, run=None, check=False)
+    assert proc.returncode != 0 and "run=<name>" in proc.stderr
+    proc = run_bench(*ov, run="a/b", check=False)
+    assert proc.returncode != 0 and "run name" in proc.stderr
 
 
 def test_plot_selection_from_the_command_line(contract_dir, tmp_path):
