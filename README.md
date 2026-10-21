@@ -37,8 +37,12 @@ The `perf` environment installs the model packages as editable sibling checkouts
 from scimo_bench.configs.models import add_model
 
 # run by SciMo-Bench through its protocol class
-add_model("n6_muon", type="nanohep", label="nanoHEP n6 Muon",
-          checkpoint="/ptmp/me/runs/<run>/checkpoints/final.ckpt")
+add_model(
+    "n6_muon",
+    type="nanohep",
+    label="nanoHEP n6 Muon",
+    checkpoint="/ptmp/me/runs/<run>/checkpoints/final.ckpt",
+)
 # prediction files made elsewhere; only scored
 add_model("hgpflow", family="regression", predictions="/ptmp/me/bench/preds/hgpflow")
 ```
@@ -188,11 +192,11 @@ Write one class in your repo (it needs nothing from SciMo-Bench); full descripti
 
 ```python
 class MyModel:
-    def load(self, cfg): ...               # once: checkpoint, generation, options, runtime
-    def inputs(self, event_ids, size): ... # the model's own inputs for these events, on device
-    def generate(self, batch): ...         # one batch through the model (this is timed)
-    def to_floats(self, out): ...          # event_id + objects as floats (GeV, rad)
-    def info(self): ...                    # family, n_params, generation, flops_per_event, ...
+    def load(self, cfg): ...  # once: checkpoint, generation, options, runtime
+    def inputs(self, event_ids, size): ...  # the model's own inputs for these events, on device
+    def generate(self, batch): ...  # one batch through the model (this is timed)
+    def to_floats(self, out): ...  # event_id + objects as floats (GeV, rad)
+    def info(self): ...  # family, n_params, generation, flops_per_event, ...
 ```
 
 Register it with `add_model("my_model", model="my_pkg.bench:MyModel", checkpoint=...,
