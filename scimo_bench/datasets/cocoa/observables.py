@@ -14,7 +14,7 @@ from scimo_bench.catalogue import observable
 from scimo_bench.datasets.cocoa.reader import CHARGED, NEUTRAL_HADRON, PHOTON
 from scimo_bench.datasets.common import counts, energy_sum, jet
 
-CH, NH, GAMMA = r"$h^\pm$", r"$h^0$", r"$\gamma$"
+CH, NH, GAMMA = "charged hadrons", "neutral hadrons", "photons"
 
 # --- jet: the vector sum of all particles of the event -------------------------------------
 
@@ -86,47 +86,47 @@ def n_photons(ev):
     return counts(of_class(ev.particles, PHOTON).pt).astype(np.float64)
 
 
-@observable(label=f"{CH} $p_T$", unit="GeV")
+@observable(label=f"$p_T$ ({CH})", unit="GeV")
 def charged_pt(ev):
     return of_class(ev.particles, CHARGED).pt
 
 
-@observable(label=rf"{CH} $\eta$")
+@observable(label=rf"$\eta$ ({CH})")
 def charged_eta(ev):
     return of_class(ev.particles, CHARGED).eta
 
 
-@observable(label=rf"{CH} $\phi$")
+@observable(label=rf"$\phi$ ({CH})")
 def charged_phi(ev):
     return of_class(ev.particles, CHARGED).phi
 
 
-@observable(label=f"{NH} $p_T$", unit="GeV")
+@observable(label=f"$p_T$ ({NH})", unit="GeV")
 def neutral_hadron_pt(ev):
     return of_class(ev.particles, NEUTRAL_HADRON).pt
 
 
-@observable(label=rf"{NH} $\eta$")
+@observable(label=rf"$\eta$ ({NH})")
 def neutral_hadron_eta(ev):
     return of_class(ev.particles, NEUTRAL_HADRON).eta
 
 
-@observable(label=rf"{NH} $\phi$")
+@observable(label=rf"$\phi$ ({NH})")
 def neutral_hadron_phi(ev):
     return of_class(ev.particles, NEUTRAL_HADRON).phi
 
 
-@observable(label=f"{GAMMA} $p_T$", unit="GeV")
+@observable(label=f"$p_T$ ({GAMMA})", unit="GeV")
 def photon_pt(ev):
     return of_class(ev.particles, PHOTON).pt
 
 
-@observable(label=rf"{GAMMA} $\eta$")
+@observable(label=rf"$\eta$ ({GAMMA})")
 def photon_eta(ev):
     return of_class(ev.particles, PHOTON).eta
 
 
-@observable(label=rf"{GAMMA} $\phi$")
+@observable(label=rf"$\phi$ ({GAMMA})")
 def photon_phi(ev):
     return of_class(ev.particles, PHOTON).phi
 

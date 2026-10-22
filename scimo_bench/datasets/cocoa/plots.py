@@ -60,7 +60,7 @@ def jet_dr(p):
 @plot
 def n_particles(p):
     fig, ax, rax = p.figure(ratio=True)
-    p.hist(ax, "n_particles", np.arange(-0.5, 32, 2), ratio_ax=rax)
+    p.hist(ax, "n_particles", np.arange(-0.5, 32, 1), ratio_ax=rax)
     p.legend(ax)
     return fig
 
@@ -68,7 +68,7 @@ def n_particles(p):
 @plot
 def multiplicity_diff(p):
     fig, ax = p.figure()
-    p.hist(ax, "multiplicity_diff", np.arange(-10.5, 12, 2))
+    p.hist(ax, "multiplicity_diff", np.arange(-10.5, 11, 1))
     p.legend(ax)
     return fig
 
@@ -182,7 +182,7 @@ def neutral_hadron_phi(p):
 
 @plot
 def photon_pt(p):
-    return ratio_hist(p, "photon_pt", PT_BINS)
+    return ratio_hist(p, "photon_pt", np.linspace(0, 50, 26))
 
 
 @plot
@@ -220,6 +220,6 @@ def response_iqr_vs_pt(p):
 @plot
 def n_tracks(p):
     fig, ax = p.figure()
-    p.hist(ax, "n_tracks", np.arange(-0.5, 22, 2))
+    p.hist(ax, "n_tracks", np.arange(-0.5, 22, 1))
     p.legend(ax)
     return fig
