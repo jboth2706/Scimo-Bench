@@ -108,8 +108,16 @@ def guard(site: Mapping, steps, host: str | None = None) -> None:
         )
 
 
+def env_root() -> Path:
+    """The repo that holds the pixi environments: this one, or for code running from a
+    snapshot the repo it was copied from (recorded in its `REPO` file)."""
+    origin = io.REPO_ROOT / "REPO"
+    return Path(origin.read_text().strip()) if origin.exists() else io.REPO_ROOT
+
+
 def snapshot(snapshots: str | os.PathLike) -> Path:
-    """Copy the code (no envs, outputs or git) to a new folder; `COMMIT` records its commit."""
+    """Copy the code (no envs, outputs or git) to a new folder; `COMMIT` records its commit,
+    `REPO` the repo with the environments."""
     commit = git_commit()
     parent = Path(snapshots)
     parent.mkdir(parents=True, exist_ok=True)
@@ -117,6 +125,7 @@ def snapshot(snapshots: str | os.PathLike) -> Path:
     dest = Path(tempfile.mkdtemp(prefix=f"{stamp}_{commit[:7]}_", dir=parent))
     shutil.copytree(io.REPO_ROOT, dest, ignore=SNAPSHOT_IGNORE, dirs_exist_ok=True)
     (dest / "COMMIT").write_text(commit + "\n")
+    (dest / "REPO").write_text(f"{env_root()}\n")
     return dest
 
 
@@ -134,7 +143,7 @@ def slurm_script(
         *(f"#SBATCH --{k}={v}" for k, v in site["resources"][kind].items()),
         f"# written by scimo_bench.jobs for site '{site['name']}'",
         "# Before `set -u`: the env's activation scripts read unset variables.",
-        f'eval "$({q(pixi)} shell-hook --manifest-path {q(str(io.REPO_ROOT / "pixi.toml"))} '
+        f'eval "$({q(pixi)} shell-hook --manifest-path {q(str(env_root() / "pixi.toml"))} '
         f'-e {q(env)} --frozen --no-install)"',
         "set -euo pipefail",
         *site.get("setup", []),
@@ -154,7 +163,7 @@ def slurm_script(
 
 def check_env(env: str) -> None:
     """The pixi environment a job needs is installed (checked before submitting)."""
-    if not (io.REPO_ROOT / ".pixi" / "envs" / env).is_dir():
+    if not (env_root() / ".pixi" / "envs" / env).is_dir():
         flag = "" if env == "default" else f" -e {env}"
         raise RuntimeError(f"pixi env '{env}' is not installed: pixi install{flag} (README.md)")
 

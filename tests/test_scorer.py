@@ -7,8 +7,6 @@ from scimo_bench import cutflow, io, scorer
 from scimo_bench.datasets.cocoa import CATALOGUE as COCOA
 from scimo_bench.scorer import (
     IQR,
-    Efficiency,
-    FakeRate,
     Mean,
     Median,
     ModelInfo,
@@ -19,7 +17,8 @@ from scimo_bench.scorer import (
 )
 from tests import synthetic
 
-PARAMS = dict(match_dr=0.05, emd_r=1.0)
+PARAMS = {}
+CLASS_COUNTS = ["n_charged", "n_neutral_hadrons", "n_photons"]
 EDGES = [0, 40, 80, 120, 160, 200, 1000]
 
 
@@ -49,8 +48,6 @@ def test_values_match_numpy_references(truth):
         Std("std", "jet_e_response"),
         Quantile("q90", "jet_e_response", q=0.9),
         Median("bmed", "jet_e_response", x="truth.jet_pt", binning=EDGES),
-        Efficiency("eff", "particle_matched", x="truth.particle_pt", binning=[1, 5, 10, 1000]),
-        FakeRate("fake", "particle_fake"),
     ]
     j, res = score(truth, {"m": pred}, metrics)
     r = res.report.set_index(["metric", "bin_low"])
@@ -76,9 +73,6 @@ def test_values_match_numpy_references(truth):
             assert row["lower"] <= row["value"] <= row["upper"]
         else:
             assert row["status"] == "invalid"
-    # all matched within 0.05 (angles untouched) -> efficiency 1 in every bin, no fakes
-    assert (res.report[res.report.metric == "eff"]["value"] == 1.0).all()
-    assert r.loc[("fake", np.nan), "value"] == 0.0
 
 
 def test_empty_bin_is_invalid(truth):
@@ -95,7 +89,7 @@ def test_missing_field_does_not_abort(truth):
     }
     metrics = [
         Median("resp", "jet_e_response", x="truth.jet_pt", binning=EDGES),
-        Median("emd", "event_emd"),
+        Median("ptr", "jet_pt_response"),  # needs no energy
     ]
     j = io.join(truth, preds)
     infos = [ModelInfo("ok", "c"), ModelInfo("noe", "c"), ModelInfo("gone", "c", available=False)]
@@ -103,11 +97,35 @@ def test_missing_field_does_not_abort(truth):
     rep = res.report
     noe = rep[rep.model == "noe"]
     assert (noe[noe.metric == "resp"].status == "missing").all()
-    assert (noe[noe.metric == "emd"].status == "ok").all()
+    assert (noe[noe.metric == "ptr"].status == "ok").all()
     assert (rep[rep.model == "gone"].status == "missing").all()
     assert len(rep[rep.model == "gone"]) == len(rep[rep.model == "ok"])
     assert list(rep.columns) == scorer.REPORT_COLUMNS
     assert set(rep.kind) == {"quality"}
+
+
+def test_class_multiplicities(truth):
+    """Per-class counts and their differences: known answers from the synthetic classes."""
+    preds = {
+        "ident": synthetic.identical(truth),
+        "dropped": synthetic.dropped(truth),
+        "nocls": synthetic.missing_field(synthetic.identical(truth), "cls"),
+    }
+    metrics = [Mean(f"{n}_diff_mean", f"{n}_diff") for n in CLASS_COUNTS]
+    j = io.join(truth, preds)
+    vals = scorer.evaluate(j, COCOA, PARAMS)
+    cls = ak.to_numpy(ak.flatten(truth.particles.cls))
+    for c, n in enumerate(CLASS_COUNTS):
+        assert vals["truth"][n].sum() == (cls == c).sum()
+    total = sum(vals["truth"][n] for n in CLASS_COUNTS)
+    assert np.array_equal(total, vals["truth"]["n_particles"])
+    d = vals["dropped"]
+    assert np.array_equal(sum(d[f"{n}_diff"] for n in CLASS_COUNTS), d["multiplicity_diff"])
+    rep = scorer.score(j, [ModelInfo(m, "c") for m in preds], metrics, COCOA, PARAMS, n_boot=20)
+    rep = rep.report
+    assert (rep[rep.model == "ident"].value == 0).all()
+    assert (rep[rep.model == "dropped"].value < 0).all()
+    assert (rep[rep.model == "nocls"].status == "missing").all()
 
 
 def test_paired_bootstrap_and_reproducibility(truth):
@@ -169,8 +187,6 @@ def test_rankings(truth):
     assert list(rk.columns) == scorer.RANKING_COLUMNS
 
 
-# 30 % smearing gives a few negative pT values; the EMD (computed in every run) warns on them
-@pytest.mark.filterwarnings("ignore:Problem infeasible")
 def test_normalized_score(truth):
     preds = {
         "base": synthetic.smeared(truth, 0.3, seed=1),

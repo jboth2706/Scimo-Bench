@@ -1,7 +1,7 @@
 """COCOA comparisons: quantities of the truth and one model's output (reco), row by row.
 
-Task parameters are keyword arguments with defaults; `task.params` overrides them
-(`match_dr`, `emd_r`). Labels say which side each part comes from.
+Task parameters would be keyword arguments with defaults (`task.params` overrides them);
+these need none. Labels say which side each part comes from.
 """
 
 from __future__ import annotations
@@ -9,8 +9,14 @@ from __future__ import annotations
 import numpy as np
 
 from scimo_bench.catalogue import comparison
-from scimo_bench.datasets.cocoa.observables import jet_e, n_particles
-from scimo_bench.datasets.common import delta_phi, emd, flat, jet, match, ratio, unflatten
+from scimo_bench.datasets.cocoa.observables import (
+    jet_e,
+    n_charged,
+    n_neutral_hadrons,
+    n_particles,
+    n_photons,
+)
+from scimo_bench.datasets.common import delta_phi, jet, ratio
 
 # --- jet -----------------------------------------------------------------------------------
 
@@ -36,48 +42,16 @@ def multiplicity_diff(truth, reco):
     return n_particles(reco) - n_particles(truth)
 
 
-# --- particles, matched in ΔR --------------------------------------------------------------
+@comparison(label=r"$N_{h^\pm,\mathrm{reco}} - N_{h^\pm,\mathrm{truth}}$", reference=0.0)
+def n_charged_diff(truth, reco):
+    return n_charged(reco) - n_charged(truth)
 
 
-@comparison(label="truth particle matched to reco", reference=1.0)
-def particle_matched(truth, reco, match_dr=0.05):
-    """1 per truth particle with a matched reco particle, else 0 (→ efficiency)."""
-    m = match(truth, reco, match_dr)
-    return unflatten((m["truth_idx"] >= 0).astype(np.float64), m["truth_counts"])
+@comparison(label=r"$N_{h^0,\mathrm{reco}} - N_{h^0,\mathrm{truth}}$", reference=0.0)
+def n_neutral_hadrons_diff(truth, reco):
+    return n_neutral_hadrons(reco) - n_neutral_hadrons(truth)
 
 
-@comparison(label="reco particle without truth match", reference=0.0)
-def particle_fake(truth, reco, match_dr=0.05):
-    """1 per reco particle without a truth match, else 0 (→ fake rate)."""
-    m = match(truth, reco, match_dr)
-    return unflatten((~m["reco_matched"]).astype(np.float64), m["reco_counts"])
-
-
-@comparison(label=r"$\Delta R$(reco, truth) of matched particles", reference=0.0)
-def particle_dr(truth, reco, match_dr=0.05):
-    """Per truth particle (NaN if unmatched)."""
-    m = match(truth, reco, match_dr)
-    return unflatten(m["truth_dr"], m["truth_counts"])
-
-
-@comparison(
-    label=r"$p_{T,\mathrm{reco}} / p_{T,\mathrm{truth}}$ (matched particles)", reference=1.0
-)
-def particle_pt_response(truth, reco, match_dr=0.05):
-    """Per truth particle (NaN if unmatched)."""
-    m = match(truth, reco, match_dr)
-    idx = m["truth_idx"]
-    r_pt, t_pt = flat(reco.particles.pt), flat(truth.particles.pt)
-    resp = np.full(len(idx), np.nan)
-    ok = idx >= 0
-    resp[ok] = r_pt[idx[ok]] / t_pt[ok]
-    return unflatten(resp, m["truth_counts"])
-
-
-# --- event distance ------------------------------------------------------------------------
-
-
-@comparison(label="EMD(truth, reco)", unit="GeV", reference=0.0)
-def event_emd(truth, reco, emd_r=1.0):
-    """Unbalanced EMD between truth and reco particles per event (`emd_r` caps ΔR)."""
-    return emd(truth.particles, reco.particles, emd_r)
+@comparison(label=r"$N_{\gamma,\mathrm{reco}} - N_{\gamma,\mathrm{truth}}$", reference=0.0)
+def n_photons_diff(truth, reco):
+    return n_photons(reco) - n_photons(truth)

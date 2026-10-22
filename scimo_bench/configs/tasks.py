@@ -7,17 +7,13 @@ this repo, versioned with the task."""
 
 from hydra_zen import builds, make_config, store
 
-from scimo_bench.scorer import IQR, Efficiency, FakeRate, Mean, Median
+from scimo_bench.scorer import IQR, Mean, Median
 
 task_store = store(group="task")
 
 JET_PT = "${task.binnings.jet_pt}"
-PARTICLE_PT = "${task.binnings.particle_pt}"
 
 PFLOW_METRICS = [
-    builds(
-        Median, name="emd_median", variable="event_emd", better="lower", label="median EMD [GeV]"
-    ),
     builds(
         Median,
         name="response_median",
@@ -37,30 +33,26 @@ PFLOW_METRICS = [
         label="IQR of jet energy response",
     ),
     builds(
-        Efficiency,
-        name="efficiency",
-        variable="particle_matched",
-        better="higher",
-        x="truth.particle_pt",
-        binning=PARTICLE_PT,
-        label="particle efficiency (truth)",
-    ),
-    builds(
-        FakeRate,
-        name="fake_rate",
-        variable="particle_fake",
-        better="lower",
-        x="reco.particle_pt",
-        binning=PARTICLE_PT,
-        label="particle fake rate (reco)",
-    ),
-    builds(
         Mean,
         name="multiplicity_diff_mean",
         variable="multiplicity_diff",
         better=dict(closest_to=0.0),
         label=r"mean $N_\mathrm{reco} - N_\mathrm{truth}$",
     ),
+    *[
+        builds(
+            Mean,
+            name=f"{n}_diff_mean",
+            variable=f"{n}_diff",
+            better=dict(closest_to=0.0),
+            label=rf"mean $N_{{{sym},\mathrm{{reco}}}} - N_{{{sym},\mathrm{{truth}}}}$",
+        )
+        for n, sym in [
+            ("n_charged", r"h^\pm"),
+            ("n_neutral_hadrons", r"h^0"),
+            ("n_photons", r"\gamma"),
+        ]
+    ],
 ]
 
 task_store(
@@ -70,9 +62,9 @@ task_store(
         version=1,
         events="data/pflow_val_v1_events.txt",
         collection="particles",  # the collection the cutflow table counts
-        # parameters of the comparisons (keyword arguments with the same name)
-        params=dict(match_dr=0.05, emd_r=1.0),
-        binnings=dict(jet_pt="${linspace:0,200,11}", particle_pt="${logspace:0,2,9}"),
+        # parameters of the comparisons (keyword arguments with the same name); none needed
+        params={},
+        binnings=dict(jet_pt="${linspace:0,200,11}"),
         metrics=PFLOW_METRICS,
         # plots drawn by default (functions of the dataset's plots.py, or `ranking`)
         plots=[
@@ -81,11 +73,19 @@ task_store(
             "jet_pt",
             "n_particles",
             "particle_pt",
-            "event_emd",
+            "n_charged",
+            "n_neutral_hadrons",
+            "n_photons",
+            "n_charged_diff",
+            "n_neutral_hadrons_diff",
+            "n_photons_diff",
+            *[
+                f"{c}_{v}"
+                for c in ("charged", "neutral_hadron", "photon")
+                for v in ("pt", "eta", "phi")
+            ],
             "response_vs_pt",
             "response_iqr_vs_pt",
-            "efficiency_vs_pt",
-            "fake_rate_vs_pt",
             "ranking",
         ],
         ranking=dict(primary="response_iqr"),

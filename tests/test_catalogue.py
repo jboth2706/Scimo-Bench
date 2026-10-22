@@ -9,11 +9,10 @@ import pytest
 from scimo_bench import catalogue, io
 from scimo_bench.catalogue import Catalogue, Missing, comparison, observable, plot
 from scimo_bench.datasets.cocoa import CATALOGUE as COCOA
-from scimo_bench.datasets.common import emd_event
 from scimo_bench.scorer import evaluate
 from tests import synthetic
 
-PARAMS = dict(match_dr=0.05, emd_r=1.0)  # the pflow task's values
+PARAMS = {}  # the pflow task's values (its comparisons need none)
 
 
 def compare(truth, reco, *names, **params):
@@ -30,51 +29,27 @@ def flat(x):
 
 
 def test_identical(truth):
-    resp, ptr, emd, matched, fake, dr, n_diff, pr = compare(
+    resp, ptr, dr, n_diff = compare(
         truth,
         synthetic.identical(truth),
         "jet_e_response",
         "jet_pt_response",
-        "event_emd",
-        "particle_matched",
-        "particle_fake",
         "jet_dr",
         "multiplicity_diff",
-        "particle_pt_response",
     )
     assert resp == pytest.approx(1.0)
     assert ptr == pytest.approx(1.0)
-    assert np.abs(emd).max() < 1e-6
-    assert flat(matched).all() and not flat(fake).any()
     assert np.allclose(dr, 0)
     assert (n_diff == 0).all()
-    assert flat(pr) == pytest.approx(1.0)
 
 
 def test_shifted_pt(truth):
-    resp, ptr, pr, emd = compare(
-        truth,
-        synthetic.shifted(truth, 1.1),
-        "jet_e_response",
-        "jet_pt_response",
-        "particle_pt_response",
-        "event_emd",
+    resp, ptr, dr = compare(
+        truth, synthetic.shifted(truth, 1.1), "jet_e_response", "jet_pt_response", "jet_dr"
     )
     assert resp == pytest.approx(1.1, rel=1e-5)
     assert ptr == pytest.approx(1.1, rel=1e-5)
-    assert flat(pr) == pytest.approx(1.1, rel=1e-5)
-    # EMD of a pure pT excess: 10 % of the truth pT moved to the ground particle at cost R=1
-    t_sum = ak.to_numpy(ak.sum(truth.particles.pt, axis=1))
-    assert emd == pytest.approx(0.1 * t_sum, rel=1e-4)
-
-
-def test_dropped_particles_efficiency(truth):
-    p = 0.2
-    matched, fake = compare(truth, synthetic.dropped(truth, p), "particle_matched", "particle_fake")
-    eff = flat(matched).mean()
-    n = len(flat(matched))
-    assert eff == pytest.approx(1 - p, abs=3 * np.sqrt(p * (1 - p) / n))
-    assert not flat(fake).any()
+    assert np.allclose(dr, 0, atol=1e-6)  # a common pT scale keeps the jet axis
 
 
 def test_observables_run_on_both_sides(truth):
@@ -130,56 +105,6 @@ def one_event(t, r):
     return arr(t), arr(r)
 
 
-def test_emd_known_values():
-    # one particle moved by ΔR = 0.1 carries all its pT that distance
-    assert emd_event(
-        np.array([10.0]),
-        np.array([0.0]),
-        np.array([0.0]),
-        np.array([10.0]),
-        np.array([0.1]),
-        np.array([0.0]),
-    ) == pytest.approx(1.0)
-    # beyond R the cost is capped
-    assert emd_event(
-        np.array([10.0]),
-        np.array([0.0]),
-        np.array([0.0]),
-        np.array([10.0]),
-        np.array([2.0]),
-        np.array([0.0]),
-    ) == pytest.approx(10.0)
-    # nothing reconstructed: all pT goes to ground at cost R
-    assert emd_event(
-        np.array([3.0, 4.0]), np.zeros(2), np.zeros(2), np.zeros(0), np.zeros(0), np.zeros(0)
-    ) == pytest.approx(7.0)
-    assert emd_event(*(np.zeros(0),) * 6) == 0.0
-    # φ wraps around ±π
-    assert emd_event(
-        np.array([5.0]),
-        np.array([0.0]),
-        np.array([3.1]),
-        np.array([5.0]),
-        np.array([0.0]),
-        np.array([-3.1]),
-    ) == pytest.approx(5.0 * (2 * np.pi - 6.2), rel=1e-6)
-
-
-def test_matching_is_greedy_by_truth_pt():
-    # two truth particles compete for one reco particle: the harder one wins
-    t, r = one_event([(5, 0.0, 0.0), (20, 0.03, 0.0)], [(10, 0.02, 0.0)])
-    matched, dr = compare(t, r, "particle_matched", "particle_dr")
-    assert flat(matched).tolist() == [0.0, 1.0]
-    assert flat(dr)[1] == pytest.approx(0.01)
-    # outside the threshold: unmatched truth, fake reco
-    t, r = one_event([(5, 0.0, 0.0)], [(5, 0.2, 0.0)])
-    matched, fake = compare(t, r, "particle_matched", "particle_fake")
-    assert flat(matched).tolist() == [0.0] and flat(fake).tolist() == [1.0]
-    # a task parameter overrides the default
-    (matched,) = compare(t, r, "particle_matched", match_dr=0.3)
-    assert flat(matched).tolist() == [1.0]
-
-
 def test_jet_massless_vector_sum():
     t, _ = one_event([(10, 0.0, 0.0), (10, 0.0, np.pi / 2)], [])
     obs = COCOA.observables
@@ -192,7 +117,7 @@ def test_catalogue_names_and_labels():
     assert COCOA.info("jet_e").axis_label() == "jet $E$ [GeV]"
     assert COCOA.info("truth.jet_e").axis_label("truth") == "jet $E$ (truth) [GeV]"
     assert COCOA.info("jet_e_response").reference == 1.0
-    assert {"match_dr", "emd_r"} == COCOA.params()
+    assert COCOA.params() == set()
     COCOA.check_name("truth.jet_pt", "x")
     COCOA.check_name("jet_e_response", "m")
     with pytest.raises(ValueError, match="truth.jet_pt or reco.jet_pt"):

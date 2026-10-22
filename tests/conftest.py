@@ -42,6 +42,8 @@ def run_bench(*overrides, check=True, env=None, run="test"):
     `run=None`); returns the CompletedProcess."""
     if run is not None and not any(o.startswith("run=") for o in overrides):
         overrides = (*overrides, f"run={run}")
+    if env is None:  # a call of its own, also when the tests run inside a job
+        env = {k: v for k, v in os.environ.items() if k not in (ENV_JOB, "SLURM_JOB_ID")}
     proc = subprocess.run(
         [sys.executable, "-m", "scimo_bench", *overrides],
         cwd=REPO_ROOT,

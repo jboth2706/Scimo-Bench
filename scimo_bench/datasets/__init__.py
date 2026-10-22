@@ -6,7 +6,7 @@ A dataset is a config entry (group `dataset`, `scimo_bench/configs/datasets.py`)
 - `module`: its package here (e.g. `scimo_bench.datasets.cocoa`) with `observables.py`,
   `comparisons.py`, `plots.py` and a `CATALOGUE` (see `scimo_bench/catalogue.py`).
 
-Shared physics helpers (jets, matching, EMD) are in `common.py`.
+Shared physics helpers (jets, ΔR) are in `common.py`.
 A new dataset = a package here (reader + the three modules) and one entry in the config.
 """
 

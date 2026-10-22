@@ -39,12 +39,10 @@ def test_real_events_end_to_end(tmp_path):
     assert set(rep.status) <= {"ok", "invalid"}
     ov = rep[rep.bin_low.isna()].set_index(["model", "metric"])["value"]
     assert ov["dummy", "response_median"] == pytest.approx(1.0)
-    assert ov["dummy", "emd_median"] == pytest.approx(0.0, abs=1e-6)
-    assert ov["dummy", "efficiency"] == 1.0
+    assert ov["dummy", "response_iqr"] == pytest.approx(0.0, abs=1e-6)
     # the 1.1x pT cut at 1 GeV moves a few particles across it; the response stays ~1.1
     assert ov["second", "response_median"] == pytest.approx(1.1, abs=0.01)
-    assert ov["second", "emd_median"] > 0
     cf = pd.read_csv(out / "cutflow.csv")
     join = cf[cf.step == "join"].set_index("model")
     assert join.loc["truth", "events"] == 1000 and join.loc["dummy", "missing_events"] == 0
-    assert (out / "plots" / "response_vs_pt.png").exists()
+    assert (out / "plots" / "response_vs_pt.pdf").exists()

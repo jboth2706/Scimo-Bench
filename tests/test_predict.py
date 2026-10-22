@@ -42,7 +42,7 @@ def test_all_steps_predict_score_and_time(contract_dir, tmp_path):
     assert meta.hardware["device"] == "cpu"
     rep, ov = overall(tmp_path / "run")
     assert ov.loc[("toy", "response_median"), "value"] == pytest.approx(1.0)
-    assert ov.loc[("toy", "emd_median"), "value"] == pytest.approx(0.0, abs=1e-6)
+    assert ov.loc[("toy", "response_iqr"), "value"] == pytest.approx(0.0, abs=1e-6)
     perf_rows = rep[(rep.kind == "perf") & rep.value.notna()]
     assert len(perf_rows) and set(perf_rows.status) == {"ok"}  # gate passed after scoring
     assert (tmp_path / "run" / "perf.csv").exists()

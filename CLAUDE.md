@@ -84,7 +84,7 @@ pixi install                      # default env: quality path (CPU, no torch)
 pixi run test                     # all tests (in-process; `pixi run test-job raven` as a job)
 pixi run lint                     # ruff check + format check
 pixi run precommit                # all pre-commit hooks (ruff, yamlfix, yamllint), as on commit
-# models come from the user's models file (example: examples/hep4m_models.py)
+# models files: models/nanohep_raven.py (models_file=nanohep_raven), or a path
 ./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' cutflow=preselection  # score+plot
 ./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' \
     steps=[predict,perf,score,plot] perf=single                # GPU job, then CPU job

@@ -1,7 +1,8 @@
 """Model configs (group `models`) and model types.
 
-The repo holds no experiment runs. Register yours in your own models file and pass it with
-`models_file=<path>`; select several with `models=[a,b]`:
+Models are registered in a models file passed with `models_file=<path or name>`: the
+nanoHEP runs on Raven are in `models/nanohep_raven.py` (`models_file=nanohep_raven`); others
+go in a file of your own (or a new one in `models/`). Select several with `models=[a,b]`:
 
     from scimo_bench.configs.models import add_model
     add_model("n6_muon", type="nanohep", checkpoint="/ptmp/.../final.ckpt")

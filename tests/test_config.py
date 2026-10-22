@@ -28,7 +28,7 @@ def test_defaults_compose():
     assert c.models == {}
     assert c.cutflow is None and c.perf is None
     assert c.output.bootstrap.n == 1000 and c.output.bootstrap.level == 0.95
-    assert list(c.output.formats) == ["png", "pdf"]
+    assert list(c.output.formats) == ["pdf"]
 
 
 def test_task_is_required():
@@ -43,6 +43,15 @@ def test_several_models_in_order():
     assert c.models.nano.model == "examples.nanohep_model:NanoHEP"
     assert c.models.nano.generation.mode == "argmax"
     assert c.models.dummy.model is None and c.models.dummy.label == "dummy"
+
+
+def test_models_file_by_name():
+    from scimo_bench.configs import MODELS_DIR, models_file_path
+
+    assert models_file_path("nanohep_raven") == MODELS_DIR / "nanohep_raven.py"
+    assert models_file_path("tests/models.py").name == "models.py"  # a path stays a path
+    with pytest.raises(FileNotFoundError, match="nanohep_raven"):
+        models_file_path("nope")
 
 
 def test_paths_come_from_the_site(monkeypatch):
@@ -73,7 +82,7 @@ def test_linspace_resolver():
 
 def test_misspelled_builds_argument_fails_at_compose_time():
     with pytest.raises(TypeError, match="nmae"):
-        builds(Median, nmae="emd_median", variable="event_emd")
+        builds(Median, nmae="response_iqr", variable="jet_e_response")
     with pytest.raises(TypeError, match="valeu"):
         builds(CutStep, cut="min_pt", valeu=1.0)
 
@@ -95,7 +104,7 @@ def test_task_metrics_and_plots_instantiate():
 
 
 def test_pareto_subgroup_override():
-    c = cfg("task=pflow", "plots=pareto", "plots/pareto=emd_vs_flops")
+    c = cfg("task=pflow", "plots=pareto", "plots/pareto=iqr_vs_flops")
     assert c.plots.pareto.x == "flops_per_event"
 
 
@@ -147,7 +156,7 @@ def test_dataset_brings_its_reader_and_catalogue():
     assert list(c.plots.draw) == list(c.task.plots)
     cat = catalogue.load(c.dataset.module)
     assert {"jet_e", "n_tracks"} <= set(cat.observables)
-    assert {"jet_e_response", "event_emd"} <= set(cat.comparisons)
+    assert {"jet_e_response", "jet_dr"} <= set(cat.comparisons)
     assert {"jet_e", "response_vs_pt"} <= set(cat.plots)
     s = cfg("task=pflow", "dataset=synthetic")
     assert s.dataset.truth._target_.endswith("ContractTruth")

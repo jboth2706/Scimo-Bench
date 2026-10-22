@@ -29,7 +29,7 @@ protocol), `score` (files only), `plot` (from the CSVs). Default `[score, plot]`
 | `main.py` | entry: loads `models_file`, composes the config, runs the steps or submits jobs |
 | `steps.py` | the four steps; each reads and writes files in the run folder |
 | `configs/` | hydra-zen groups: `task`, `dataset`, `models`, `cutflow`, `plots`, `output`, `runtime`, `perf`, `site` |
-| `datasets/` | eval datasets, one package each (`cocoa/`: `reader.py`, `observables.py`, `comparisons.py`, `plots.py`); `common.py`: jets, ΔR matching, EMD |
+| `datasets/` | eval datasets, one package each (`cocoa/`: `reader.py`, `observables.py`, `comparisons.py`, `plots.py`); `common.py`: jets, ΔR |
 | `schema.py` | contract v1: field names, validation, `meta` dataclass |
 | `io.py` | read predictions (Parquet), join, dedupe, counts |
 | `catalogue.py` | `@observable`, `@comparison`, `@plot` decorators; `Catalogue` of a dataset; names `truth.<obs>`, `reco.<obs>`, `<comparison>` |
@@ -163,7 +163,7 @@ as connected sweep curves. Output: plot + `pareto.csv` with `on_front`.
 store(
     builds(
         ParetoPlot,
-        y="emd_median",
+        y="response_iqr",
         x="latency_p50",
         perf_condition=dict(scenario="single", batch_size=1, device="A100"),
         x_log=True,
@@ -171,7 +171,7 @@ store(
         robust_dominance=False,
     ),
     group="plots/pareto",
-    name="emd_vs_latency",
+    name="iqr_vs_latency",
 )
 ```
 

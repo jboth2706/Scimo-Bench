@@ -80,11 +80,24 @@ BenchConfig = make_config(
 store(BenchConfig, name="scimo_bench")
 
 
+MODELS_DIR = Path(__file__).resolve().parents[2] / "models"  # models files kept in the repo
+
+
+def models_file_path(path: str | Path) -> Path:
+    """A models file: a path, or the name of a file in the repo's `models/` folder
+    (`nanohep_raven` → `models/nanohep_raven.py`)."""
+    p = Path(path).expanduser()
+    if not p.is_file() and p.parent == Path(".") and (MODELS_DIR / f"{p.stem}.py").is_file():
+        p = MODELS_DIR / f"{p.stem}.py"
+    if not p.is_file():
+        known = sorted(f.stem for f in MODELS_DIR.glob("*.py"))
+        raise FileNotFoundError(f"models_file {path}: no such file, nor one of {known}")
+    return p.resolve()
+
+
 def load_models_file(path: str | Path) -> Path:
     """Import a models file (`add_model(...)` calls) so its models join the store."""
-    path = Path(path).expanduser().resolve()
-    if not path.is_file():
-        raise FileNotFoundError(f"models_file {path} does not exist")
+    path = models_file_path(path)
     spec = importlib.util.spec_from_file_location(f"scimo_bench_models_{path.stem}", path)
     spec.loader.exec_module(importlib.util.module_from_spec(spec))
     store.add_to_hydra_store(overwrite_ok=True)

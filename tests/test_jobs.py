@@ -111,6 +111,7 @@ def test_submit_then_run_the_job(contract_dir, tmp_path, fake_slurm):
     assert list(sub.job_id) == [12345] and sub.kind[0] == "cpu" and sub.env[0] == "default"
     snap = Path(sub.snapshot[0])
     assert (snap / "COMMIT").exists() and (snap / "scimo_bench" / "main.py").exists()
+    assert (snap / "REPO").read_text().strip() == str(jobs.env_root())  # where the envs are
     assert not (snap / ".pixi").exists() and not (snap / "outputs").exists()
     assert (snap / "models_file.py").exists()  # the user's models file, frozen too
     assert "--parsable" in (tmp_path / "sbatch.log").read_text()

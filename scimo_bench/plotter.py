@@ -78,9 +78,13 @@ class Style:
     truth_color: str = "#b4b3ad"
     ink: str = "#0b0b0b"
     muted: str = "#52514e"
-    grid_color: str = "#e4e3df"
+    grid_color: str = "grey"
+    grid_linestyle: str = ":"
+    grid_alpha: float = 0.3
     font_size: float = 10
-    line_width: float = 2.0
+    line_width: float = 2.5
+    hist_line_width: float = 1.5  # model lines in histograms
+    ratio_marker_size: float = 3.5  # points in ratio panels
     figsize: Sequence[float] = (6.0, 4.0)
     ratio_figsize: Sequence[float] = (6.0, 5.0)
     dpi: int = 150
@@ -104,16 +108,18 @@ class Style:
     def rc_params(self) -> dict:
         """matplotlib rcParams for this style."""
         return {
-            "axes.edgecolor": self.muted,
+            "axes.edgecolor": self.ink,
             "axes.labelcolor": self.ink,
             "axes.grid": True,
             "grid.color": self.grid_color,
-            "grid.linewidth": 0.6,
+            "grid.linestyle": self.grid_linestyle,
+            "grid.alpha": self.grid_alpha,
+            "grid.linewidth": 0.8,
             "axes.axisbelow": True,
-            "axes.spines.top": False,
-            "axes.spines.right": False,
-            "xtick.color": self.muted,
-            "ytick.color": self.muted,
+            "axes.spines.top": True,  # a full frame around every plot
+            "axes.spines.right": True,
+            "xtick.color": self.ink,
+            "ytick.color": self.ink,
             "legend.frameon": False,
             "lines.linewidth": self.line_width,
             "font.size": self.font_size,
@@ -180,7 +186,7 @@ class PlotContext:
     labels: dict[str, str]
     metrics: dict[str, Metric]
     catalogue: Catalogue = field(default_factory=Catalogue)
-    formats: list[str] = field(default_factory=lambda: ["png", "pdf"])
+    formats: list[str] = field(default_factory=lambda: ["pdf"])
     task: str = ""
     style: Style = field(default_factory=Style)
     model_overrides: dict = field(default_factory=dict)  # {model: {color, linestyle}}
@@ -224,7 +230,7 @@ class PlotContext:
                 1,
                 figsize=tuple(figsize or self.style.ratio_figsize),
                 sharex=True,
-                gridspec_kw=dict(height_ratios=[3, 1], hspace=0.05),
+                gridspec_kw=dict(height_ratios=[3, 1], hspace=0.08),
             )
             return fig, ax, rax
         fig, ax = plt.subplots(figsize=tuple(figsize or self.style.figsize))
@@ -243,7 +249,8 @@ class PlotContext:
         """Histogram of an observable or comparison, with bin edges `bins`.
 
         Observable: the truth as a grey filled histogram ("truth"), each model's output as a
-        line ("<model> (reco)"), and with `ratio_ax` the ratio reco / truth. Comparison: one
+        line ("<model> (reco)"), and with `ratio_ax` the ratio pred / truth as points at the
+        bin centres in the model's colour (range 0.5–1.5). Comparison: one
         line per model. The x label comes from the catalogue; it says "(truth)" or "(reco)"
         when only one level is drawn. Nothing is drawn if there is no data.
         """
@@ -264,13 +271,23 @@ class PlotContext:
         for m, v in data.items():
             st = self.styles[m]
             h, _ = np.histogram(v, edges, density=density)
-            ax.stairs(h, edges, label=self.label(m) + (" (reco)" if is_obs else ""), **st)
+            label = self.label(m) + (" (reco)" if is_obs else "")
+            ax.stairs(h, edges, label=label, lw=self.style.hist_line_width, **st)
             if ratio_ax is not None and h_t is not None:
                 with np.errstate(divide="ignore", invalid="ignore"):
-                    ratio_ax.stairs(np.where(h_t > 0, h / h_t, np.nan), edges, **st)
+                    r = np.where(h_t > 0, h / h_t, np.nan)
+                    centres = 0.5 * (edges[:-1] + edges[1:])
+                    ratio_ax.plot(
+                        centres,
+                        r,
+                        "o",
+                        ms=self.style.ratio_marker_size,
+                        color=st["color"],
+                        ls="none",
+                    )
         if info.reference is not None:
             ax.axvline(info.reference, color=self.style.muted, lw=1, ls=":")
-        ax.set_ylabel("density" if density else "entries")
+        ax.set_ylabel("entries (normalized)" if density else "entries")
         side = None
         if is_obs and not data:
             side = "truth"
@@ -279,8 +296,9 @@ class PlotContext:
         (ratio_ax if ratio_ax is not None else ax).set_xlabel(info.axis_label(side))
         if ratio_ax is not None:
             ratio_ax.axhline(1.0, color=self.style.muted, lw=1)
-            ratio_ax.set_ylabel("reco / truth")
+            ratio_ax.set_ylabel("pred / truth")
             ratio_ax.set_ylim(0.5, 1.5)
+            ratio_ax.set_yticks([0.5, 1.0, 1.5])
 
     def metric_vs_x(
         self, ax, metric: str, log_x: bool = False, models: Sequence[str] | None = None
@@ -331,9 +349,7 @@ class PlotContext:
         handles, labels = ax.get_legend_handles_labels()
         if len(handles) < 2:
             title = f"{title} · {labels[0]}" if labels else title
-            ax.set_title(
-                title, loc="left", fontsize=self.style.font_size - 1, color=self.style.muted
-            )
+            ax.set_title(title, loc="left", fontsize=self.style.font_size - 1, color=self.style.ink)
             return
         if self.style.legend == "above":
             leg = ax.legend(
@@ -345,7 +361,7 @@ class PlotContext:
             )
         else:
             leg = ax.legend(loc=self.style.legend, title=title, alignment="left")
-        leg.get_title().set_color(self.style.muted)
+        leg.get_title().set_color(self.style.ink)
         leg.get_title().set_fontsize(self.style.font_size - 1)
 
     def save(self, fig, name: str) -> list[Path]:
@@ -401,7 +417,7 @@ def ranking(p: PlotContext):
     for s in ax.spines.values():
         s.set_visible(False)
     title = f"{p.task}: rank per metric (1 = best)"
-    ax.set_title(title, loc="left", fontsize=p.style.font_size - 1, color=p.style.muted)
+    ax.set_title(title, loc="left", fontsize=p.style.font_size - 1, color=p.style.ink)
     return fig
 
 
@@ -454,7 +470,9 @@ def pareto_front(x, y, y_better="lower", x_err=None, y_err=None, robust=False) -
 class ParetoPlot:
     """Quality metric `y` against cost `x` (a perf metric under one fixed perf condition,
     e.g. {scenario: single, batch_size: 1}); writes its points to `pareto.csv`.
-    `connect_sweeps`: join a model's points; `robust_dominance`: use the intervals."""
+    `connect_sweeps`: join a model's points; `robust_dominance`: use the intervals;
+    `xlim`/`ylim`: axis ranges [low, high]. Each model is named next to its point (no
+    legend)."""
 
     def __init__(
         self,
@@ -468,6 +486,8 @@ class ParetoPlot:
         show_front: bool = True,
         xlabel: str | None = None,
         ylabel: str | None = None,
+        xlim: Sequence[float] | None = None,
+        ylim: Sequence[float] | None = None,
         title: str | None = None,
         figsize: list[float] | None = None,
         models: list[str] | None = None,
@@ -483,6 +503,8 @@ class ParetoPlot:
         self.show_front = show_front
         self.xlabel = xlabel
         self.ylabel = ylabel
+        self.xlim = xlim
+        self.ylim = ylim
         self.title = title
         self.figsize = figsize
         self.models = models
@@ -556,7 +578,6 @@ class ParetoPlot:
                 color=pc.style.ink,
                 lw=1,
                 ls="--",
-                label="Pareto front",
                 zorder=1,
             )
         for m in pc.select(self.models):
@@ -577,8 +598,16 @@ class ParetoPlot:
                 mec="white",
                 mew=1.5,
                 elinewidth=1.2,
-                label=pc.label(m),
                 zorder=3,
+            )
+            ax.annotate(
+                pc.label(m),
+                (r["x"].iloc[0], r["y"].iloc[0]),
+                xytext=(6, 4),
+                textcoords="offset points",
+                fontsize=pc.style.font_size - 1,
+                color=st["color"],
+                zorder=4,
             )
             if self.connect_sweeps and len(r) > 1:
                 ax.plot(r["x"], r["y"], color=st["color"], ls=st["linestyle"], lw=1.2, zorder=2)
@@ -586,9 +615,14 @@ class ParetoPlot:
             pc.log_x(ax)
         if self.y_log:
             ax.set_yscale("log")
+        if self.xlim is not None:
+            ax.set_xlim(*self.xlim)
+        if self.ylim is not None:
+            ax.set_ylim(*self.ylim)
         ax.set_xlabel(self.xlabel or self.x + _condition_suffix(self.perf_condition))
         ax.set_ylabel(self.ylabel or (metric.label if metric is not None else self.y))
-        pc.legend(ax, self.title if self.title is not None else f"{pc.task}: quality vs cost")
+        title = self.title if self.title is not None else f"{pc.task}: quality vs cost"
+        ax.set_title(title, loc="left", fontsize=pc.style.font_size - 1, color=pc.style.ink)
         return pc.save(fig, self.name)
 
 

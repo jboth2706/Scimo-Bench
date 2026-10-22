@@ -190,18 +190,6 @@ class Std(Metric):
         return weighted_std(s, w)
 
 
-class Efficiency(Mean):
-    """Fraction of truth objects matched (mean of `particle_matched`)."""
-
-    default_better = "higher"
-
-
-class FakeRate(Mean):
-    """Fraction of predicted objects without a truth match (mean of `particle_fake`)."""
-
-    default_better = "lower"
-
-
 def better_key(better, values: np.ndarray) -> np.ndarray:
     """Map values to a key where lower is better."""
     values = np.asarray(values, dtype=float)

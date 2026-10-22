@@ -32,9 +32,13 @@ STYLE = dict(
     truth_color="#b4b3ad",
     ink="#0b0b0b",
     muted="#52514e",
-    grid_color="#e4e3df",
+    grid_color="grey",
+    grid_linestyle=":",
+    grid_alpha=0.3,
     font_size=10,
-    line_width=2.0,
+    line_width=2.5,
+    hist_line_width=1.5,  # model lines in histograms
+    ratio_marker_size=3.5,  # points in ratio panels
     figsize=[6.0, 4.0],
     ratio_figsize=[6.0, 5.0],
     dpi=150,
@@ -48,32 +52,40 @@ def pareto(**kw):
     return builds(ParetoPlot, **kw, populate_full_signature=True)
 
 
+# the y axis of the jet-response-IQR Pareto plots
+IQR_AXIS = dict(ylabel="IQR of jet energy response", ylim=[0.01, 0.2])
+
 pareto_store(
     pareto(
-        y="emd_median",
+        y="response_iqr",
         x="latency_p50",
         perf_condition=dict(scenario="single", batch_size=1),
-        name="pareto_emd_vs_latency",
+        # one event of COCOA single jet = one jet; batch size 1 → ms per jet
+        xlabel="median latency [ms / jet]",
+        **IQR_AXIS,
+        name="pareto_iqr_vs_latency",
     ),
-    name="emd_vs_latency",
+    name="iqr_vs_latency",
 )
 pareto_store(
     pareto(
-        y="emd_median",
+        y="response_iqr",
         x="gpu_s_per_1k",
         perf_condition=dict(scenario="offline", batch_size=256),
-        name="pareto_emd_vs_gpu_s",
+        **IQR_AXIS,
+        name="pareto_iqr_vs_gpu_s",
     ),
-    name="emd_vs_gpu_s",
+    name="iqr_vs_gpu_s",
 )
 pareto_store(
     pareto(
-        y="emd_median",
+        y="response_iqr",
         x="flops_per_event",
         perf_condition=dict(scenario="single", batch_size=1),
-        name="pareto_emd_vs_flops",
+        **IQR_AXIS,
+        name="pareto_iqr_vs_flops",
     ),
-    name="emd_vs_flops",
+    name="iqr_vs_flops",
 )
 
 
@@ -83,4 +95,4 @@ def plots_conf(**kw):
 
 
 plots_store(plots_conf(), name="default")
-plots_store(plots_conf(hydra_defaults=["_self_", {"pareto": "emd_vs_latency"}]), name="pareto")
+plots_store(plots_conf(hydra_defaults=["_self_", {"pareto": "iqr_vs_latency"}]), name="pareto")

@@ -39,12 +39,15 @@ def make_truth(n_events: int = 500, seed: int = 0, mean_n: float = 7.0) -> ak.Ar
         phis.append(np.angle(np.exp(1j * np.array(phi))))
     c = np.array([len(p) for p in pts])
     pt, eta, phi = (np.concatenate(x) for x in (pts, etas, phis))
+    # class: 0 charged, 1 neutral hadron, 2 photon (own generator: kinematics unchanged)
+    cls = np.random.default_rng(seed + 1).choice(3, len(pt), p=[0.5, 0.15, 0.35]).astype(np.int32)
     particles = ak.zip(
         {
             "pt": ak.unflatten(pt.astype(np.float32), c),
             "eta": ak.unflatten(eta.astype(np.float32), c),
             "phi": ak.unflatten(phi.astype(np.float32), c),
             "e": ak.unflatten((pt * np.cosh(eta)).astype(np.float32), c),
+            "cls": ak.unflatten(cls, c),
         }
     )
     ids = np.arange(FIRST_ID, FIRST_ID + n_events, dtype=np.int64)

@@ -1,12 +1,13 @@
 """Entry point: load the user's models file, compose the config, then run the steps
 in-process or submit them as jobs of the selected site.
 
-    ./run.sh site=raven run=depth_sweep models_file=~/bench_models.py task=pflow \
+    ./run.sh site=raven run=depth_sweep models_file=nanohep_raven task=pflow \
         'models=[a,b]' steps=[predict,perf,score,plot] perf=single
 
 Every call names its run (`run=<name>`); everything goes into `<paths.outputs>/<name>/`.
 A call with `predict` or `score` into an existing run is refused unless `--force` is given
-(it empties the run folder, keeping `predictions/`).
+(it empties the run folder, keeping `predictions/` and, unless `perf` runs again, the
+timings).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from hydra_zen import store
 from omegaconf import DictConfig, OmegaConf
 
 from scimo_bench import io, jobs, plotter, steps
-from scimo_bench.configs import MODEL_STEPS, STEPS, load_models_file
+from scimo_bench.configs import MODEL_STEPS, STEPS, load_models_file, models_file_path
 
 log = logging.getLogger("scimo_bench")
 
@@ -117,8 +118,9 @@ def run_dir(cfg: DictConfig) -> Path:
 
 def prepare_run_dir(cfg: DictConfig, folder: Path) -> None:
     """A call with `predict` or `score` starts its run: an existing run folder is an
-    error, unless `force` (--force), which empties it but keeps `predictions/`. Jobs skip
-    this: the call that submitted them did it."""
+    error, unless `force` (--force), which empties it but keeps the models' outputs:
+    `predictions/`, and the timings (`perf.csv`, `perf_meta_*.json`) unless this call runs
+    `perf` again. Jobs skip this: the call that submitted them did it."""
     if jobs.in_job() or not {"predict", "score"} & set(cfg.steps):
         return
     if not folder.exists() or not any(folder.iterdir()):
@@ -126,10 +128,11 @@ def prepare_run_dir(cfg: DictConfig, folder: Path) -> None:
     if not cfg.force:
         raise FileExistsError(
             f"run '{cfg.run}' exists: {folder}; choose another run=<name>, or overwrite it "
-            f"with {FORCE_FLAG} (its {PREDICTIONS}/ are kept)"
+            f"with {FORCE_FLAG} (its {PREDICTIONS}/ and timings are kept)"
         )
+    keep = {PREDICTIONS} | (set() if "perf" in cfg.steps else {steps.PERF})
     for p in folder.iterdir():
-        if p.name == PREDICTIONS:
+        if p.name in keep or ("perf" not in cfg.steps and p.name.startswith("perf_meta_")):
             continue
         if p.is_dir():
             shutil.rmtree(p)
@@ -178,7 +181,7 @@ def submit(cfg: DictConfig, folder: Path) -> None:
     models_file = None
     if cfg.models_file:
         models_file = snap / MODELS_FILE
-        shutil.copy(Path(cfg.models_file).expanduser(), models_file)
+        shutil.copy(models_file_path(cfg.models_file), models_file)
     after = None
     for todo, kind, env in groups:
         command = ["python", "-m", "scimo_bench", *job_overrides(cfg, folder, todo, models_file)]

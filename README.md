@@ -29,11 +29,13 @@ CONDA_OVERRIDE_CUDA=12.9 pixi install -e perf   # only to run models: torch + mo
 The `perf` environment installs the model packages as editable sibling checkouts
 (`../scimo`, `../scimo-framework`); see `pixi.toml`.
 
-**2. List your models** in a small Python file of your own (not in this repo; example:
-`examples/hep4m_models.py`):
+**2. List your models** in a models file. The nanoHEP runs on Raven are in
+`models/nanohep_raven.py` (pass it as `models_file=nanohep_raven`; for now it registers one
+run, `depth_n6_muon`). For other models, add a file
+to `models/` or keep one of your own and pass its path:
 
 ```python
-# ~/bench_models.py
+# models/my_models.py  (models_file=my_models), or any path
 from scimo_bench.configs.models import add_model
 
 # run by SciMo-Bench through its protocol class
@@ -53,20 +55,20 @@ add_model("hgpflow", family="regression", predictions="/ptmp/me/hgpflow_preds")
 
 ```bash
 # run the models, time them, score them, plot (on Raven: a GPU job, then a CPU job)
-./run.sh site=raven run=n6_vs_hgpflow models_file=~/bench_models.py task=pflow \
+./run.sh site=raven run=n6_vs_hgpflow models_file=my_models task=pflow \
     'models=[n6_muon,hgpflow]' steps=[predict,perf,score,plot] perf=single cutflow=preselection
 
 # score the same run again (e.g. after adding a variable): the predictions are kept
-./run.sh site=raven run=n6_vs_hgpflow models_file=~/bench_models.py task=pflow \
+./run.sh site=raven run=n6_vs_hgpflow models_file=my_models task=pflow \
     'models=[n6_muon,hgpflow]' cutflow=preselection --force
 
 # redraw, with quality-vs-cost plots (runs right where you call it)
-./run.sh site=raven run=n6_vs_hgpflow models_file=~/bench_models.py task=pflow \
+./run.sh site=raven run=n6_vs_hgpflow models_file=my_models task=pflow \
     'models=[n6_muon,hgpflow]' steps=[plot] plots=pareto
 ```
 
 A call with `predict` or `score` into a run that exists is refused; `--force` empties the run
-folder first but keeps its `predictions/`. `steps=[plot]` and `steps=[perf]` work on an
+folder first but keeps its `predictions/` and timings (unless `perf` runs again). `steps=[plot]` and `steps=[perf]` work on an
 existing run.
 
 **4. Look at the results**:
@@ -75,7 +77,7 @@ existing run.
 squeue --me                                                    # the jobs
 tail -f /ptmp/$USER/bench/outputs/n6_vs_hgpflow/job-*.out      # their logs
 column -s, -t < /ptmp/$USER/bench/outputs/n6_vs_hgpflow/rankings.csv
-ls /ptmp/$USER/bench/outputs/n6_vs_hgpflow/plots               # PNG + PDF
+ls /ptmp/$USER/bench/outputs/n6_vs_hgpflow/plots               # PDF
 ```
 
 ---
@@ -142,7 +144,7 @@ to a snapshot, so later edits do not change queued jobs. Job scripts, Slurm logs
 | Setting | Meaning | Default |
 |---------|---------|---------|
 | `run=` | the run's name: its folder is `<paths.outputs>/<name>/` | required |
-| `--force` | overwrite an existing run (its `predictions/` are kept) | off |
+| `--force` | overwrite an existing run (its `predictions/` and timings are kept) | off |
 | `site=` | `local` or `raven` | `local` |
 | `paths.data` | data root; the dataset's truth file is found below it | raven: `/ptmp/$USER`; local: none |
 | `paths.outputs` | where the run folders are | raven: `/ptmp/$USER/bench/outputs`; local: `outputs` |
@@ -185,7 +187,7 @@ adds one.
 | `per_event.parquet` | every observable (truth and reco) and comparison per event, for plots and later analysis |
 | `perf.csv` | timings as measured, before the gate |
 | `pareto.csv` | quality-vs-cost points, on the front or not |
-| `plots/` | PNG and PDF |
+| `plots/` | PDF (`output.formats=[pdf,png]` adds PNG) |
 | `run.log`, `jobs.csv`, `job-*.sh`, `job-*.out` | commit, warnings, jobs |
 | `resolved_config*.yaml` | the full configuration used |
 
@@ -226,9 +228,9 @@ is one package with four files, each with one job:
 scimo_bench/datasets/cocoa/
     reader.py        the truth file → events (collections `particles`, `tracks`)
     observables.py   quantities of ONE set of events: jet pT, particles per event, ...
-    comparisons.py   quantities of the truth AND one model: responses, matching, EMD
+    comparisons.py   quantities of the truth AND one model: jet responses, ΔR, multiplicity
     plots.py         one function per plot
-scimo_bench/datasets/common.py   physics helpers any dataset can use (jet, ΔR, matching, EMD)
+scimo_bench/datasets/common.py   physics helpers any dataset can use (jet, ΔR, ...)
 ```
 
 | COCOA (`dataset=cocoa`) | |
@@ -280,16 +282,17 @@ def jet_mass_response(truth, reco):
     return ratio(jet_mass(reco), jet_mass(truth))
 
 
-@comparison(label="truth particle matched to reco", reference=1.0)
-def particle_matched(truth, reco, match_dr=0.05):
-    m = match(truth, reco, match_dr)
-    return unflatten((m["truth_idx"] >= 0).astype(np.float64), m["truth_counts"])
+@comparison(label=r"$\Delta R$(reco jet, truth jet)", reference=0.0)
+def jet_dr(truth, reco, max_dr=None):  # a task parameter: task.params.max_dr=0.4
+    t, r = jet(truth.particles), jet(reco.particles)
+    dr = np.hypot(r["eta"] - t["eta"], delta_phi(r["phi"], t["phi"]))
+    return dr if max_dr is None else np.minimum(dr, max_dr)
 ```
 
 - A comparison may call observables (`jet_mass(reco)`) and the helpers in
-  `datasets/common.py` (`jet`, `match`, `emd`, `delta_phi`, `ratio`, `counts`, `flat`, ...).
+  `datasets/common.py` (`jet`, `energy_sum`, `delta_phi`, `ratio`, `counts`, `flat`, ...).
 - Task parameters are keyword arguments with a default; the task's `params` override them
-  (`task.params.match_dr=0.1`). A parameter no comparison has is a configuration error.
+  (as in the sketch above). A parameter no comparison has is a configuration error.
 - `reference` is the ideal value (drawn as a dotted line). Let the label say which side
   each part comes from (reco, truth).
 
@@ -310,7 +313,7 @@ Every observable and comparison is computed in every `score` step and stored in
   )
   builds(Mean, name="n_particles_reco", variable="reco.n_particles")
   ```
-  Metrics: `Median`, `IQR`, `Mean`, `Std`, `Quantile`, `Efficiency`, `FakeRate`
+  Metrics: `Median`, `IQR`, `Mean`, `Std`, `Quantile`
   (`scimo_bench/scorer.py`). A plain observable name without `truth.` / `reco.` is an error.
 
 ---
@@ -322,7 +325,7 @@ model. Every step states **which side it cuts** with `on`:
 
 | `on` | Cuts | Example use |
 |------|------|-------------|
-| `truth` | the truth objects / events only | the truth acceptance in which efficiency is measured |
+| `truth` | the truth objects / events only | the truth acceptance |
 | `reco` | the models' output objects only | a threshold on what the models reconstruct |
 | `both` | truth and reco, each on its own values | the same acceptance on both sides |
 
@@ -332,8 +335,8 @@ model. Every step states **which side it cuts** with `on`:
 - **Event cuts** (`min_particles`) remove whole events and must be `on: truth`: every model is
   scored on the same events, so an event cannot be dropped for one model and kept for another
   (anything else is a configuration error).
-- Cutting one side only changes what the metrics mean: with `min_pt` on `truth` only, a
-  reco particle below the threshold has no truth partner left and counts as a fake.
+- Cutting one side only changes what the metrics mean: with `min_pt` on `truth` only, the
+  reco jet still contains particles the truth jet no longer has.
 
 The cutflow `preselection` (`scimo_bench/configs/cutflows.py`):
 
@@ -374,7 +377,7 @@ dropped objects for the truth and for each model.
 ## Plots
 
 Every plot is one function in the dataset's `plots.py`, saved as
-`plots/<function name>.png/.pdf`:
+`plots/<function name>.pdf` (`output.formats=[pdf,png]` adds PNG):
 
 ```python
 @plot
@@ -489,6 +492,6 @@ sized for all cores inside a small cgroup made scoring ~150× slower.
 | M7 | Pareto front | done; real points need M2 |
 
 Decisions taken while building (proposals in [`docs/PLAN.md`](docs/PLAN.md)): event list =
-first 20,000 `eventNumber`s of the val file; greedy ΔR < 0.05 matching by truth pT;
+first 20,000 `eventNumber`s of the val file; no particle matching (jet-level metrics);
 duplicate truth objects dropped; multiplicity from the model, oracle results labelled in
 plots; the overall value of a binned metric uses all events.

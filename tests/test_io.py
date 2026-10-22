@@ -7,7 +7,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from scimo_bench import io
-from scimo_bench.datasets.cocoa.reader import CocoaTruth
+from scimo_bench.datasets.cocoa.reader import CocoaTruth, particle_class
 from scimo_bench.schema import Meta, condition_hash, validate
 from tests import synthetic
 from tests.conftest import COCOA_VAL
@@ -42,7 +42,7 @@ def test_flat_dotted_columns_and_kv_meta(tmp_path, truth):
     pq.write_table(table, tmp_path / "flat.parquet")
     arr, m = io.read_predictions(tmp_path / "flat.parquet")
     assert set(arr.fields) == {"event_id", "sample_id", "particles"}  # raw.* dropped
-    assert set(arr.particles.fields) == {"pt", "eta", "phi", "e"}
+    assert set(arr.particles.fields) == {"pt", "eta", "phi", "e", "cls"}
     assert ak.all(arr.sample_id == 0)
     assert m.model["family"] == "token_ar"
     assert validate(arr, m, TASK) == []
@@ -145,12 +145,17 @@ def test_dedupe(truth):
     assert ak.all(ak.num(out.particles) == ak.num(p))
 
 
+def test_particle_class_by_charge():
+    pdgid = [211, -211, 11, -13, 2212, 3222, -3312, 22, 2112, -2112, 130, 310, 3122, -3322]
+    assert particle_class(pdgid).tolist() == [0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1]
+
+
 @pytest.mark.real_data
 @pytest.mark.skipif(not COCOA_VAL.exists(), reason="COCOA val file not available")
 def test_real_cocoa_truth():
     truth = CocoaTruth(COCOA_VAL).read()
     assert len(truth) == 99_955
-    assert set(truth.particles.fields) == {"pt", "eta", "phi", "e", "pdgid"}
+    assert set(truth.particles.fields) == {"pt", "eta", "phi", "e", "pdgid", "cls"}
     assert {"pt", "eta", "phi", "d0", "z0", "particle_idx"} == set(truth.tracks.fields)
     assert ak.sum(ak.num(truth.tracks)) > 0
     _, groups = io.duplicate_groups(truth)

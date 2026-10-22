@@ -11,7 +11,8 @@ What happens per batch of event ids:
 - `generate`: autoregressive decoding of truthpart with `decode_chunk` (structural
   decoding: only truthpart codes, stops at <EOS>); this is what is timed;
 - `to_floats`: tokens → (content, position) codes → physics with the truthpart VQ-VAE
-  (`hep4m.decoding.Detokenizer` from the nanoHEP repo): pt, e [GeV], eta, phi [rad].
+  (`hep4m.decoding.Detokenizer` from the nanoHEP repo): pt, e [GeV], eta, phi [rad] and
+  the class `cls` (0 charged, 1 neutral hadron, 2 photon).
 
 `options` (all have defaults for COCOA on Raven):
 - `tokenized_root`: the tokenized data (default: the checkpoint's `data.tokenized_root`);
@@ -51,7 +52,7 @@ DEFAULTS = dict(
     modality_dict=str(NANOHEP_REPO / "experiments/4m7_gold/modality_dict_pflow.yml"),
     vqvae_root="/ptmp/jboth/COCOA/Checkpoints",
     max_new_tokens=200,
-    decode_batch_size=256,
+    decode_batch_size=1024,
     truth_tokens=False,
 )
 DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": None}
@@ -141,7 +142,7 @@ class NanoHEP:
         return self.vocab.decode_element_with_pos(OUTPUT, tokens)
 
     def to_floats(self, out):
-        """Codes → pt, e [GeV], eta, phi [rad] with the truthpart VQ-VAE."""
+        """Codes → pt, e [GeV], eta, phi [rad] and class `cls` with the truthpart VQ-VAE."""
         ids, codes = out
         n = np.array([len(c) for c, _ in codes])
         width = max(int(n.max(initial=0)), 1)
@@ -161,6 +162,8 @@ class NanoHEP:
             phi=phi,
             e=dec[f"{OUTPUT}_e"],
         )
+        if f"{OUTPUT}_class" in dec:  # charged, neutral hadron, photon (argmax)
+            cols["cls"] = dec[f"{OUTPUT}_class"].to(torch.int32)
         particles = {k: [v.numpy()[i][keep[i]] for i in range(len(ids))] for k, v in cols.items()}
         return {"event_id": ids, "particles": particles}
 

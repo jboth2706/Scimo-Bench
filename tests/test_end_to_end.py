@@ -43,7 +43,6 @@ def test_output_folder(quality_run):
     for stem in (
         "jet_e_response",
         "response_vs_pt",
-        "efficiency_vs_pt",
         "ranking",
         "jet_e",
     ):
@@ -56,9 +55,8 @@ def test_output_folder(quality_run):
 def test_report_contents(quality_run):
     rep = pd.read_csv(quality_run / "report.csv")
     ov = rep[rep.bin_low.isna()].set_index(["model", "metric"])
-    assert ov.loc[("dummy", "emd_median"), "value"] == pytest.approx(0.0, abs=1e-6)
+    assert ov.loc[("dummy", "response_iqr"), "value"] == pytest.approx(0.0, abs=1e-6)
     assert ov.loc[("dummy", "response_median"), "value"] == pytest.approx(1.0)
-    assert ov.loc[("dummy", "efficiency"), "value"] == 1.0
     assert ov.loc[("second", "response_iqr"), "value"] > 0.02
     assert set(rep.kind) == {"quality"} and set(rep.task_version) == {1}
     assert rep.condition.str.startswith("gen=").all()
@@ -100,7 +98,7 @@ def test_missing_field_model_does_not_abort(contract_dir, tmp_path):
     rep = pd.read_csv(out / "report.csv")
     noe = rep[rep.model == "second"]
     assert (noe[noe.metric.str.startswith("response")].status == "missing").all()
-    assert (noe[noe.metric == "emd_median"].status == "ok").all()
+    assert (noe[noe.metric == "multiplicity_diff_mean"].status == "ok").all()
     assert "missing field 'particles.e'" in (out / "run.log").read_text()
 
 
@@ -133,13 +131,13 @@ def test_perf_and_pareto(contract_dir, tmp_path):
     assert (ok.status == "ok").all(), ok
     # gate: response_iqr <= 0.25 holds for both synthetic models
     assert (out / "perf_meta_smoke.json").exists()
-    run_bench(*ov, "steps=[plot]", "plots=pareto", "plots/pareto=emd_vs_flops")
+    run_bench(*ov, "steps=[plot]", "plots=pareto", "plots/pareto=iqr_vs_flops")
     par = pd.read_csv(out / "pareto.csv")
     assert set(par.model) == {"dummy", "second"}
-    # same FLOPs (same toy), dummy has EMD 0 -> only dummy on the front
+    # same FLOPs (same toy), dummy has response IQR 0 -> only dummy on the front
     assert par.set_index("model").loc["dummy", "on_front"]
     assert not par.set_index("model").loc["second", "on_front"]
-    assert (out / "plots" / "pareto_emd_vs_flops.png").exists()
+    assert (out / "plots" / "pareto_iqr_vs_flops.png").exists()
 
 
 def test_named_run_folder_and_force(contract_dir, tmp_path):
@@ -153,12 +151,14 @@ def test_named_run_folder_and_force(contract_dir, tmp_path):
     assert (run / "report.csv").exists()
     (run / "predictions").mkdir()
     (run / "predictions" / "keep.txt").write_text("x")
+    (run / "perf_meta_single.json").write_text("{}")
     proc = run_bench(*ov, "steps=[score]", run="sweep", check=False)
     assert proc.returncode != 0 and "--force" in proc.stderr
     run_bench(*ov, "steps=[plot]", run="sweep")  # plot-only: the run is reused
     assert (run / "plots").exists()
     run_bench(*ov, "steps=[score]", "--force", run="sweep")
     assert (run / "predictions" / "keep.txt").exists() and not (run / "plots").exists()
+    assert (run / "perf_meta_single.json").exists()  # timings kept: no perf in this call
     proc = run_bench(*ov, "steps=[plot]", run="nope", check=False)
     assert proc.returncode != 0 and "score it first" in proc.stderr
     proc = run_bench(*ov, run=None, check=False)
@@ -171,13 +171,13 @@ def test_plot_selection_from_the_command_line(contract_dir, tmp_path):
     out = tmp_path / "cfg"
     run_bench(
         *synthetic_overrides(contract_dir, out),
-        "plots.extra=[jet_eta,particle_pt_response]",
+        "plots.extra=[jet_eta,jet_dr]",
         "plots.skip=[ranking]",
         "models.dummy.color=black",
         "plots.style.font_size=12",
     )
     names = {p.stem for p in (out / "plots").iterdir()}
-    assert {"jet_eta", "particle_pt_response", "jet_e"} <= names and "ranking" not in names
+    assert {"jet_eta", "jet_dr", "jet_e"} <= names and "ranking" not in names
     cfg = OmegaConf.load(out / "resolved_config.yaml")
     assert cfg.models.dummy.color == "black" and cfg.dataset.name == "synthetic"
 

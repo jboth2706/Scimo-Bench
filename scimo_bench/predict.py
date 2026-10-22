@@ -52,10 +52,13 @@ def generate(model, rt: perf.Runtime, events: np.ndarray) -> tuple[ak.Array, flo
 
 
 def to_float32(arr: ak.Array) -> ak.Array:
-    """Collection fields as float32 (contract v1)."""
+    """Collection fields as float32 (contract v1); the class `cls` as int32."""
     for coll in arr.fields:
         if arr[coll].fields:
-            sub = {f: ak.values_astype(arr[coll][f], np.float32) for f in arr[coll].fields}
+            sub = {
+                f: ak.values_astype(arr[coll][f], np.int32 if f == "cls" else np.float32)
+                for f in arr[coll].fields
+            }
             arr = ak.with_field(arr, ak.zip(sub), coll)
     return arr
 
