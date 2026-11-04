@@ -17,6 +17,7 @@ relying on a line number; the code moves.
 | raw COCOA val (truth source) | `/ptmp/jboth/COCOA/COCOA_samples_singlejet/val_100K_cells256/singlejet_10_100kseg_bw100.0.root`, tree `EventTree`, 99,955 events |
 | truth branches | `particle_pt`, `particle_eta`, `particle_phi`, `particle_e` (GeV), `particle_pdgid`, `eventNumber` |
 | tokenized data (model input) | `/ptmp/jboth/COCOA/Tokenized_7mod/{train,val}`; raw uint16, 6 values per particle `[cb0, cb1, cb2, pos_eta, pos_cosphi, pos_sinphi]`, offsets int64, `event_numbers.npy` |
+| continuous data (`pflow_cont` model input) | `/ptmp/jboth/COCOA/Continuous_7mod/{train,val}` (same path on Viper); `topo_cont`, `track_cont`: 5 features per object (eta, phi in columns 3, 4), standardized with train's `*_cont_meta.npz`; truthpart as tokens; val 99,954 events (all 20,000 task events), `event_numbers.npy` raw int64 |
 | VQ-VAE checkpoints (Stage 1) | `/ptmp/jboth/COCOA/Checkpoints/vqxtrpartx128x8x1xxx3hty86rc6e3c/` (truthpart) and siblings |
 | HGPflow inference (possible baseline) | `/ptmp/jboth/COCOA/HGPflow_inference` (not inspected yet) |
 
@@ -64,3 +65,23 @@ count). SciMo-Bench defaults to the model's own multiplicity.
   125 GB) or `gpu` (4× A100). `gpudev` (15 min) only for short tests.
 - hep4m_scimo submit helpers: `workflow/raven/submit.sh`, `workflow/raven/sweep.sh`
   (`--dry-run`, `--dev`, `--resume`).
+
+## Continuous-input nanoHEP (`pflow_cont`)
+
+- Code in hep4m_scimo (branch `exp/cont_inputs`): `modalities/cont_token_stream.py` (layout,
+  vocabulary with `<CONT:m>` / `<CONT_POS>` placeholders, encoder, dataset),
+  `eval/cont_token_stream_decode.py` (`load_event_chunks`, `decode_chunk`),
+  `configs/experiments/nanohep_cont.py` (`pflow_cont/{base,smoke,20M_10ep}`),
+  `scripts/decode_cont.py` (reference decoding of a run).
+- `data.split_pos=true`: every topo cluster / track takes two positions (content features,
+  then (eta, sin phi, cos phi) at `<CONT_POS>`).
+- Trained on Viper (MI300A, `workflow/viper/submit.sh`, outputs on Viper's `/ptmp`, which
+  is `/viper/ptmp2/jboth` from the compute nodes, not visible from Raven): benchmark there
+  with `site=viper models_file=nanohep_viper`, or copy the run folder to Raven.
+- Viper setup for `site=viper`: model env `/viper/u2/jboth/scimo-rocm` (untouched; pyarrow
+  for it in `/viper/u2/jboth/scimo-bench-env/rocm-extras`), default env
+  `/viper/u2/jboth/scimo-bench-env` (copy of `pixi.toml`/`pixi.lock`, `pixi install -e
+  default --frozen`), truth file copied to `/viper/ptmp2/jboth/COCOA/COCOA_samples_singlejet/`.
+  On the login nodes `/u/jboth` and `/ptmp/jboth` are not the compute nodes' (`/viper/u2`,
+  `/viper/ptmp2`); pixi is `/viper/u2/jboth/.pixi/bin/pixi`.
+- SciMo-Bench class: `examples/nanohep_cont_model.py` (model type `nanohep_cont`).

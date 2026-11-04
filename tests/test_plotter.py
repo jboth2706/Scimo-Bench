@@ -6,6 +6,7 @@ import pytest
 from scimo_bench import plotter
 from scimo_bench.datasets.cocoa import CATALOGUE as COCOA
 from scimo_bench.plotter import model_styles
+from scimo_bench.scorer import IQR, Median
 
 
 def test_styles_are_stable_and_distinct():
@@ -36,7 +37,7 @@ def context(tmp_path, per_event=None, models=("a",)):
 
 def test_plots_without_data_are_skipped(tmp_path):
     pc = context(tmp_path)
-    plots = [COCOA.plots["jet_e"], COCOA.plots["response_vs_pt"], plotter.ranking]
+    plots = [COCOA.plots["jet_e"], COCOA.plots["response_vs_e"], plotter.ranking]
     assert plotter.draw(pc, plots) == [] and not (tmp_path / "pareto.csv").exists()
 
 
@@ -95,3 +96,42 @@ def test_model_style_overrides_and_style_keys():
     assert small.rc_params()["font.size"] == 12
     with pytest.raises(ValueError, match="fontsize"):
         plotter.Style.from_cfg({"fontsize": 12})
+
+
+def test_median_and_iqr_in_two_panels(tmp_path):
+    """A binned median/IQR pair: one figure, median above, IQR below, x label once."""
+    edges = [20.0, 40.0, 60.0]
+    metrics = {
+        m.name: m
+        for m in (
+            Median(
+                "response_median", "jet_e_response", x="truth.jet_e", binning=edges, label="med"
+            ),
+            IQR("response_iqr", "jet_e_response", x="truth.jet_e", binning=edges, label="iqr"),
+        )
+    }
+    rows = [
+        dict(
+            model="a",
+            metric=name,
+            bin_low=lo,
+            bin_high=hi,
+            value=v,
+            lower=v,
+            upper=v,
+            status="ok",
+            kind="quality",
+        )
+        for name, v in (("response_median", 1.0), ("response_iqr", 0.1))
+        for lo, hi in zip(edges[:-1], edges[1:], strict=True)
+    ]
+    pc = context(tmp_path)
+    pc.report, pc.metrics = pd.DataFrame(rows), metrics
+    fig = COCOA.plots["response_vs_e"](pc)
+    top, bottom = fig.axes
+    assert top.get_ylabel() == "med"
+    assert bottom.get_ylabel() == "iqr"
+    assert top.get_xlabel() == "" and bottom.get_xlabel() == "jet $E$ (truth) [GeV]"
+    assert [p.name for p in plotter.draw(pc, [COCOA.plots["response_vs_e"]])] == [
+        "response_vs_e.png"
+    ]

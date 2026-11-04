@@ -26,7 +26,7 @@ protocol), `score` (files only), `plot` (from the CSVs). Default `[score, plot]`
 
 | Module | Role |
 |--------|------|
-| `main.py` | entry: loads `models_file`, composes the config, runs the steps or submits jobs |
+| `main.py` | entry: loads `models_file`, composes the config, runs the steps or starts the workflow |
 | `steps.py` | the four steps; each reads and writes files in the run folder |
 | `configs/` | hydra-zen groups: `task`, `dataset`, `models`, `cutflow`, `plots`, `output`, `runtime`, `perf`, `site` |
 | `datasets/` | eval datasets, one package each (`cocoa/`: `reader.py`, `observables.py`, `comparisons.py`, `plots.py`); `common.py`: jets, ΔR |
@@ -39,7 +39,8 @@ protocol), `score` (files only), `plot` (from the CSVs). Default `[score, plot]`
 | `protocol.py` | the model protocol (the only interface to model code) |
 | `predict.py` | step `predict`: run a protocol model over the task's events, write its file |
 | `perf.py` | runtime, scenarios, timing, quality gate |
-| `jobs.py` | login-node guard, job scripts, submission from a code snapshot |
+| `jobs.py` | login-node guard, job scripts, code snapshots |
+| `workflow.py` | a cluster site's steps as a Snakemake workflow (`workflow/Snakefile`, profiles in `workflow/profiles/`) |
 
 ## Config groups (hydra-zen)
 
@@ -47,7 +48,7 @@ Set per call (everything else has defaults):
 
 | What | How |
 |------|-----|
-| where it runs, and default paths | `site=local` (in-process) / `site=raven` (Slurm jobs) |
+| where it runs, and default paths | `site=local` (in-process) / `site=raven` (Snakemake workflow of Slurm jobs) |
 | run name, data root, run folders, snapshots | `run=<name>` (required; folder `<paths.outputs>/<name>`, predictions in `predictions/`), `paths.data`, `paths.outputs`, `paths.snapshots` (defaults from the site) |
 | which models | `models_file=<your file>` + `'models=[a,b]'` |
 | what to do | `steps=[predict,perf,score,plot]` |
@@ -101,14 +102,42 @@ or scenario + batch size + device (perf).
 ## Sites and jobs
 
 Config group `site` (`configs/sites.py`): `local` runs a call in-process; a cluster site
-(`raven`, Slurm) submits it and returns. The submitting call fixes the run folder, copies the
-code and the models file to a snapshot folder, and writes `job-<steps>.sh` and `jobs.csv`
-into the run folder. Model steps (`predict`, `perf`) run as one job on the runtime's device
-in the models' pixi env; `score` + `plot` run as a CPU job that starts only if the model
-job succeeded (`--dependency=afterok`). Each job re-runs the same overrides in-process from
-the snapshot. `plot` alone runs in-process everywhere. On a login node of any known site,
-outside a job, other steps are refused (`jobs.guard`). Folders a site lists as `node_local`
-(raven: `/tmp`) are refused for jobs.
+(`raven`, `viper`) runs it as a Snakemake workflow (`workflow.py`, `workflow/Snakefile`). The
+site config holds paths, pixi environments, bundled packages and setup lines; the job
+resources are in the site's Snakemake profile `workflow/profiles/<site>/config.yaml`
+(execution config, YAML like any Snakemake profile; `site.profile` picks another). Per call,
+`site.set_resources` (rule → resources) is merged into the profile's `set-resources`, and
+`site.snakemake_args` adds Snakemake options. The Raven profile names its partitions
+(`small`, `gpu`): without one the Slurm executor would take the default `interactive`.
+
+The call fixes the run folder, copies the code and the models file to a snapshot folder,
+writes one job script per step into `jobs/` and the workflow config `workflow.json`, then
+runs Snakemake in the run folder with the site's profile. It blocks until the workflow ends
+(the controller runs on the login node; long runs in tmux). The DAG:
+
+```
+predict-<model>  one job per model with a class, in the model's env (runtime's device)
+perf             all models in one job, so their timings come from the same GPU
+score            after the predict jobs and perf (both write report.csv)
+plot             after score
+```
+
+Each job re-runs the same overrides in-process from the snapshot for its one step
+(`only=<model>` for a predict job), logging to `logs/<step>[-<model>].log`; it touches
+`status/<step>.done` when it ends. A model whose class fails still ends its job (the model
+is `missing` in the scores, invariant 6). Only the requested steps are rules. A step reruns
+if its marker is missing, a step before it finished later, or the hash of the config entries
+it reads changed (`workflow.READS`, Snakemake's `params` trigger); so adding a model to an
+existing run predicts only that model. Code changes are not tracked: `--force` empties the
+run folder as in-process (keeping `predictions/` and the timings) and reruns every requested
+step. With `runtime=cpu` the model rules are `predict_cpu` / `perf_cpu` (default, CPU
+resources of the profile). `python -m scimo_bench.workflow <site> -- <command>` runs any
+command as one job (`pixi run test-job raven`).
+
+`plot` alone runs in-process everywhere. On a login node of any known site, outside a job,
+other steps are refused (`jobs.guard`). Folders a site lists as `node_local` (raven: `/tmp`)
+are refused for jobs. Models in different pixi envs can predict in one workflow (one job
+each), but not be timed together (`perf` is one job) nor run in-process.
 
 ## Statistics
 

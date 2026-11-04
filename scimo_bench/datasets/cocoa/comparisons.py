@@ -10,7 +10,11 @@ import numpy as np
 
 from scimo_bench.catalogue import comparison
 from scimo_bench.datasets.cocoa.observables import (
+    e_charged,
+    e_neutral_hadrons,
+    e_photons,
     jet_e,
+    jet_m,
     n_charged,
     n_neutral_hadrons,
     n_particles,
@@ -35,6 +39,39 @@ def jet_pt_response(truth, reco):
 def jet_dr(truth, reco):
     t, r = jet(truth.particles), jet(reco.particles)
     return np.hypot(r["eta"] - t["eta"], delta_phi(r["phi"], t["phi"]))
+
+
+@comparison(label=r"$\eta_\mathrm{reco} - \eta_\mathrm{truth}$ (jet)", reference=0.0)
+def jet_deta(truth, reco):
+    return jet(reco.particles)["eta"] - jet(truth.particles)["eta"]
+
+
+@comparison(label=r"$\phi_\mathrm{reco} - \phi_\mathrm{truth}$ (jet)", unit="rad", reference=0.0)
+def jet_dphi(truth, reco):
+    return delta_phi(jet(reco.particles)["phi"], jet(truth.particles)["phi"])
+
+
+@comparison(label=r"$m_\mathrm{reco} / m_\mathrm{truth}$ (jet)", reference=1.0)
+def jet_m_response(truth, reco):
+    return ratio(jet_m(reco), jet_m(truth))
+
+
+# --- energy per class ----------------------------------------------------------------------
+
+
+@comparison(label=r"$E_{h^\pm,\mathrm{reco}} / E_{h^\pm,\mathrm{truth}}$", reference=1.0)
+def e_charged_response(truth, reco):
+    return ratio(e_charged(reco), e_charged(truth))
+
+
+@comparison(label=r"$E_{h^0,\mathrm{reco}} / E_{h^0,\mathrm{truth}}$", reference=1.0)
+def e_neutral_hadrons_response(truth, reco):
+    return ratio(e_neutral_hadrons(reco), e_neutral_hadrons(truth))
+
+
+@comparison(label=r"$E_{\gamma,\mathrm{reco}} / E_{\gamma,\mathrm{truth}}$", reference=1.0)
+def e_photons_response(truth, reco):
+    return ratio(e_photons(reco), e_photons(truth))
 
 
 @comparison(label=r"$N_\mathrm{reco} - N_\mathrm{truth}$ (particles)", reference=0.0)

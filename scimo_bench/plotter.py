@@ -222,8 +222,18 @@ class PlotContext:
 
     # --- building blocks for plot functions ------------------------------------------------
 
-    def figure(self, ratio: bool = False, figsize: Sequence[float] | None = None):
-        """A figure: (fig, ax), or (fig, ax, ratio_ax) with a ratio panel below."""
+    def figure(self, ratio: bool = False, figsize: Sequence[float] | None = None, panels: int = 1):
+        """A figure: (fig, ax), (fig, ax, ratio_ax) with a ratio panel below, or with
+        `panels` > 1 (fig, axes) of equal panels stacked on a shared x axis."""
+        if panels > 1:
+            fig, axes = plt.subplots(
+                panels,
+                1,
+                figsize=tuple(figsize or self.style.ratio_figsize),
+                sharex=True,
+                gridspec_kw=dict(hspace=0.08),
+            )
+            return fig, tuple(axes)
         if ratio:
             fig, (ax, rax) = plt.subplots(
                 2,

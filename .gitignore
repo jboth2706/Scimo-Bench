@@ -221,3 +221,4 @@ __marimo__/
 
 # scimo-bench: run folders written by local runs
 outputs/
+.snakemake/

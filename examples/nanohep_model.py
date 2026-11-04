@@ -63,6 +63,29 @@ class NanoHEP:
 
     def load(self, cfg: dict) -> None:
         """Model from the checkpoint's `hep4m_config`, tokenized data, VQ-VAE decoder."""
+        self._setup(cfg)
+        ckpt = torch.load(self.checkpoint, map_location="cpu", weights_only=False)
+        hcfg = OmegaConf.create(ckpt["hep4m_config"])
+        runtime = token_stream_runtime(hcfg.data)
+        self._set_model(assemble_model(hcfg, runtime), ckpt)
+
+        data = OmegaConf.to_container(hcfg.data, resolve=True)
+        io = data["sampling_dict"]["fixed_input_output_modalities"]
+        self.input_mods, self.output_mods = list(io["input"]), list(io["output"])
+        if self.output_mods != [OUTPUT]:
+            raise ValueError(f"expected output modality {OUTPUT}, got {self.output_mods}")
+        self.vocab = self.tok_vocab = make_hep_vocab(**data["vocab_args"])
+        self.encoder = TokenStreamEncoder(self.vocab, data["block_size"])
+        root = self.opts.get("tokenized_root") or data["tokenized_root"]
+        split_dir = Path(root) / self.opts["split"]
+        self.dataset = token_stream_dataset(
+            root, self.opts["split"], data["all_modalities"], self.vocab
+        )
+        self._set_index(split_dir)
+        self._set_detokenizer()
+
+    def _setup(self, cfg: dict) -> None:
+        """Device, precision, generation settings, options, seed."""
         rt = cfg["runtime"]
         self.device = rt["device"]
         self.dtype = DTYPES.get(rt.get("precision"), None) if "cuda" in self.device else None
@@ -71,9 +94,8 @@ class NanoHEP:
         self.checkpoint = cfg["checkpoint"]
         torch.manual_seed(int(self.generation.get("seed", 0)))
 
-        ckpt = torch.load(self.checkpoint, map_location="cpu", weights_only=False)
-        hcfg = OmegaConf.create(ckpt["hep4m_config"])
-        model = assemble_model(hcfg, token_stream_runtime(hcfg.data, hcfg.get("vocab_pad_to", 1)))
+    def _set_model(self, model, ckpt: dict) -> None:
+        """The checkpoint's weights (compile and Lightning prefixes stripped), on the device."""
         state = {
             k.removeprefix("model.").replace("._orig_mod.", "."): v
             for k, v in ckpt["state_dict"].items()
@@ -82,21 +104,13 @@ class NanoHEP:
         self.model = model.to(self.device).eval()
         self.n_params = sum(p.numel() for p in model.parameters())
 
-        data = OmegaConf.to_container(hcfg.data, resolve=True)
-        io = data["sampling_dict"]["fixed_input_output_modalities"]
-        self.input_mods, self.output_mods = list(io["input"]), list(io["output"])
-        if self.output_mods != [OUTPUT]:
-            raise ValueError(f"expected output modality {OUTPUT}, got {self.output_mods}")
-        self.vocab = make_hep_vocab(**data["vocab_args"])
-        self.encoder = TokenStreamEncoder(self.vocab, data["block_size"])
-        root = self.opts.get("tokenized_root") or data["tokenized_root"]
-        split_dir = Path(root) / self.opts["split"]
-        self.dataset = token_stream_dataset(
-            root, self.opts["split"], data["all_modalities"], self.vocab
-        )
+    def _set_index(self, split_dir: Path) -> None:
+        """event id → position in the split (`event_numbers.npy`, raw int64)."""
         numbers = np.fromfile(split_dir / "event_numbers.npy", dtype="<i8")
         self.index = {int(n): i for i, n in enumerate(numbers)}
 
+    def _set_detokenizer(self) -> None:
+        """The truthpart VQ-VAE decoder (codes → physics)."""
         os.environ.setdefault("NANOHEP_EXPERIMENTS_ROOT", self.opts["vqvae_root"])
         self.detok = Detokenizer(self.opts["modality_dict"], [OUTPUT], device=self.device)
 
@@ -137,17 +151,19 @@ class NanoHEP:
     def _codes(self, tokens: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Global token ids → (content codes [n, 3], position codes [n, 3]); an
         incomplete last particle (cut by max_new_tokens) is dropped."""
-        width = self.vocab.num_quantizers[OUTPUT] + self.vocab.num_q_pos[OUTPUT]
-        tokens = tokens[: len(tokens) - len(tokens) % width]
-        return self.vocab.decode_element_with_pos(OUTPUT, tokens)
+        nq, nqp = self.tok_vocab.num_quantizers[OUTPUT], self.tok_vocab.num_q_pos[OUTPUT]
+        tokens = tokens[: len(tokens) - len(tokens) % (nq + nqp)]
+        if len(tokens) == 0:  # nothing generated (or the prefix did not fit)
+            return np.zeros((0, nq), np.int64), np.zeros((0, nqp), np.int64)
+        return self.tok_vocab.decode_element_with_pos(OUTPUT, tokens)
 
     def to_floats(self, out):
         """Codes → pt, e [GeV], eta, phi [rad] and class `cls` with the truthpart VQ-VAE."""
         ids, codes = out
         n = np.array([len(c) for c, _ in codes])
         width = max(int(n.max(initial=0)), 1)
-        content = np.zeros((len(codes), width, self.vocab.num_quantizers[OUTPUT]), np.int64)
-        pos = np.zeros((len(codes), width, self.vocab.num_q_pos[OUTPUT]), np.int64)
+        content = np.zeros((len(codes), width, self.tok_vocab.num_quantizers[OUTPUT]), np.int64)
+        pos = np.zeros((len(codes), width, self.tok_vocab.num_q_pos[OUTPUT]), np.int64)
         for i, (c, p) in enumerate(codes):
             content[i, : len(c)], pos[i, : len(p)] = c, p
         mask = torch.from_numpy(np.arange(width)[None, :] < n[:, None])

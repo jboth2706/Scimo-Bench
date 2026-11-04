@@ -49,7 +49,7 @@ def jet_e_response(p):
 @plot
 def jet_dr(p):
     fig, ax = p.figure()
-    p.hist(ax, "jet_dr", np.linspace(0, 0.2, 21))
+    p.hist(ax, "jet_dr", np.linspace(0, 0.1, 16))
     p.legend(ax)
     return fig
 
@@ -195,23 +195,105 @@ def photon_phi(p):
     return ratio_hist(p, "photon_phi", PHI_BINS)
 
 
-# --- metrics in bins (from report.csv) -----------------------------------------------------
+# --- jet direction and mass; energy per class ----------------------------------------------
+
+DIFF_BINS = np.linspace(-0.05, 0.05, 41)
+RESPONSE_BINS = np.linspace(0, 2, 41)
 
 
 @plot
-def response_vs_pt(p):
-    fig, ax = p.figure()
-    p.metric_vs_x(ax, "response_median")
-    p.legend(ax)
+def jet_deta(p):
+    return single_hist(p, "jet_deta", DIFF_BINS)
+
+
+@plot
+def jet_dphi(p):
+    return single_hist(p, "jet_dphi", DIFF_BINS)
+
+
+@plot
+def jet_m_response(p):
+    return single_hist(p, "jet_m_response", RESPONSE_BINS)
+
+
+@plot
+def e_charged_response(p):
+    return single_hist(p, "e_charged_response", RESPONSE_BINS)
+
+
+@plot
+def e_neutral_hadrons_response(p):
+    return single_hist(p, "e_neutral_hadrons_response", RESPONSE_BINS)
+
+
+@plot
+def e_photons_response(p):
+    return single_hist(p, "e_photons_response", RESPONSE_BINS)
+
+
+# --- metrics in bins (from report.csv): median above, IQR below ----------------------------
+
+
+def median_iqr(p, median, iqr, median_ylim=None, iqr_ylim=None):
+    """Two binned metrics on a shared x axis: `median` (top) and `iqr` (bottom).
+    `median_ylim`/`iqr_ylim`: y ranges [low, high] of the two panels."""
+    fig, (top, bottom) = p.figure(panels=2)
+    p.metric_vs_x(top, median)
+    p.metric_vs_x(bottom, iqr)
+    if median_ylim is not None:
+        top.set_ylim(*median_ylim)
+    if iqr_ylim is not None:
+        bottom.set_ylim(*iqr_ylim)
+    top.set_xlabel("")
+    p.legend(top)
     return fig
 
 
 @plot
-def response_iqr_vs_pt(p):
-    fig, ax = p.figure()
-    p.metric_vs_x(ax, "response_iqr")
-    p.legend(ax)
-    return fig
+def response_vs_e(p):
+    return median_iqr(
+        p, "response_median", "response_iqr", median_ylim=(0.9, 1.1), iqr_ylim=(0.02, 0.15)
+    )
+
+
+@plot
+def response_vs_n(p):
+    return median_iqr(p, "response_median_vs_n", "response_iqr_vs_n")
+
+
+@plot
+def response_vs_charged_frac(p):
+    return median_iqr(p, "response_median_vs_charged_frac", "response_iqr_vs_charged_frac")
+
+
+@plot
+def response_vs_nh_frac(p):
+    return median_iqr(p, "response_median_vs_nh_frac", "response_iqr_vs_nh_frac")
+
+
+@plot
+def response_vs_ntracks(p):
+    return median_iqr(p, "response_median_vs_ntracks", "response_iqr_vs_ntracks")
+
+
+@plot
+def response_vs_track_width(p):
+    return median_iqr(p, "response_median_vs_track_width", "response_iqr_vs_track_width")
+
+
+@plot
+def deta_vs_eta(p):
+    return median_iqr(p, "deta_median", "deta_iqr")
+
+
+@plot
+def deta_vs_e(p):
+    return median_iqr(p, "deta_median_vs_e", "deta_iqr_vs_e")
+
+
+@plot
+def dphi_vs_e(p):
+    return median_iqr(p, "dphi_median", "dphi_iqr")
 
 
 # --- tracks (truth only) -------------------------------------------------------------------

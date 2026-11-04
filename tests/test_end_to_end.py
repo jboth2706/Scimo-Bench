@@ -42,7 +42,7 @@ def test_output_folder(quality_run):
     plots = {p.name for p in (quality_run / "plots").iterdir()}
     for stem in (
         "jet_e_response",
-        "response_vs_pt",
+        "response_vs_e",
         "ranking",
         "jet_e",
     ):

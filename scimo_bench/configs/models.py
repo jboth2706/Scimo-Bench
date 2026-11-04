@@ -37,6 +37,13 @@ TYPES = {
     "nanohep": dict(
         family="token_ar", model="examples.nanohep_model:NanoHEP", generation=ARGMAX, env="perf"
     ),
+    # continuous inputs (topo clusters, tracks as features), truthpart tokens out
+    "nanohep_cont": dict(
+        family="token_ar",
+        model="examples.nanohep_cont_model:NanoHEPCont",
+        generation=ARGMAX,
+        env="perf",
+    ),
 }
 
 

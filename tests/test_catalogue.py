@@ -113,6 +113,74 @@ def test_jet_massless_vector_sum():
     assert obs["jet_eta"](t)[0] == pytest.approx(0.0)
 
 
+def events(particles, tracks=None):
+    """Events from per-event lists of particles {pt, eta, phi, e, cls} (and tracks)."""
+    fields = {
+        "event_id": np.arange(1, len(particles) + 1),
+        "sample_id": np.zeros(len(particles), dtype=np.int64),
+        "particles": ak.Array(particles),
+    }
+    if tracks is not None:
+        fields["tracks"] = ak.Array(tracks)
+    return ak.zip(fields, depth_limit=1)
+
+
+def p4(pt, eta, phi, e, cls=0):
+    return dict(pt=pt, eta=eta, phi=phi, e=e, cls=cls)
+
+
+def test_jet_mass():
+    obs = COCOA.observables
+    back_to_back = [p4(10, 0, 0, 10), p4(10, 0, np.pi, 10)]
+    assert obs["jet_m"](events([back_to_back]))[0] == pytest.approx(20.0)
+    # an energy below |p| (a model's own e output): m² < 0 is clipped to 0
+    assert obs["jet_m"](events([[p4(10, 0, 0, 9)]]))[0] == 0.0
+
+
+def test_energy_per_class_and_fractions():
+    ev = events([[p4(5, 0, 0, 10, 0), p4(5, 0, 1, 20, 1), p4(5, 0, 2, 30, 2), p4(5, 0, 3, 40, 0)]])
+    obs = COCOA.observables
+    assert obs["e_charged"](ev)[0] == pytest.approx(50)
+    assert obs["e_neutral_hadrons"](ev)[0] == pytest.approx(20)
+    assert obs["e_photons"](ev)[0] == pytest.approx(30)
+    assert obs["charged_e_fraction"](ev)[0] == pytest.approx(0.5)
+    assert obs["neutral_hadron_e_fraction"](ev)[0] == pytest.approx(0.2)
+
+
+def test_jet_direction_differences():
+    """One particle per event: the jet axis is the particle; Δφ is wrapped."""
+    t = events([[p4(10, 0.5, 3.0, 20)]])
+    r = events([[p4(10, 0.6, -3.0, 20)]])
+    deta, dphi = compare(t, r, "jet_deta", "jet_dphi")
+    assert deta[0] == pytest.approx(0.1)
+    assert dphi[0] == pytest.approx(2 * np.pi - 6.0)
+
+
+def test_scaled_model_responses(truth):
+    """pT and E × 1.1: jet mass and every class energy scale by 1.1 (classes absent from an
+    event give no value); the jet axis stays."""
+    j = io.join(truth, {"m": synthetic.shifted(truth, 1.1)})
+    t, r = j.truth_rows("m"), j.preds["m"]
+    comp, obs = COCOA.comparisons, COCOA.observables
+    massive = obs["jet_m"](t) > 1.0  # not single (massless) particles
+    assert comp["jet_m_response"](t, r)[massive] == pytest.approx(1.1, rel=1e-4)
+    for name in ("e_charged_response", "e_neutral_hadrons_response", "e_photons_response"):
+        v = comp[name](t, r)
+        v = v[np.isfinite(v)]
+        assert len(v) > 0 and v == pytest.approx(1.1, rel=1e-4), name
+    assert np.allclose(comp["jet_deta"](t, r), 0, atol=1e-5)
+    assert np.allclose(comp["jet_dphi"](t, r), 0, atol=1e-5)
+
+
+def test_track_width():
+    """pT-weighted ΔR of all tracks to the jet axis (η = 0, φ = 0); no tracks → NaN."""
+    particles = [[p4(10, 0, 0, 10)], [p4(10, 0, 0, 10)]]
+    tracks = [[dict(pt=1.0, eta=0.1, phi=0.0), dict(pt=3.0, eta=0.0, phi=-0.2)], []]
+    w = COCOA.observables["track_width"](events(particles, tracks))
+    assert w[0] == pytest.approx((1 * 0.1 + 3 * 0.2) / 4)
+    assert np.isnan(w[1])
+
+
 def test_catalogue_names_and_labels():
     assert COCOA.info("jet_e").axis_label() == "jet $E$ [GeV]"
     assert COCOA.info("truth.jet_e").axis_label("truth") == "jet $E$ (truth) [GeV]"

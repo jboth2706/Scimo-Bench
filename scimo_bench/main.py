@@ -1,13 +1,14 @@
 """Entry point: load the user's models file, compose the config, then run the steps
-in-process or submit them as jobs of the selected site.
+in-process or as the selected site's Snakemake workflow of jobs (`workflow.py`).
 
-    ./run.sh site=raven run=depth_sweep models_file=nanohep_raven task=pflow \
+    ./run.sh site=raven run=cont_split_n5 models_file=nanohep_raven task=pflow \
         'models=[a,b]' steps=[predict,perf,score,plot] perf=single
 
 Every call names its run (`run=<name>`); everything goes into `<paths.outputs>/<name>/`.
-A call with `predict` or `score` into an existing run is refused unless `--force` is given
-(it empties the run folder, keeping `predictions/` and, unless `perf` runs again, the
-timings).
+In-process, a call with `predict` or `score` into an existing run is refused unless `--force`
+is given (it empties the run folder, keeping `predictions/` and, unless `perf` runs again,
+the timings). The workflow of a cluster site reruns only what is missing or out of date in an
+existing run; `--force` empties it the same way and reruns every requested step.
 """
 
 from __future__ import annotations
@@ -19,17 +20,15 @@ import sys
 from pathlib import Path
 
 import hydra
-from hydra.core.hydra_config import HydraConfig
 from hydra_zen import store
 from omegaconf import DictConfig, OmegaConf
 
-from scimo_bench import io, jobs, plotter, steps
-from scimo_bench.configs import MODEL_STEPS, STEPS, load_models_file, models_file_path
+from scimo_bench import io, jobs, plotter, steps, workflow
+from scimo_bench.configs import MODEL_STEPS, STEPS, load_models_file
 
 log = logging.getLogger("scimo_bench")
 
 RUN_LOG = "run.log"
-MODELS_FILE = "models_file.py"  # the user's models file, copied into job snapshots
 PREDICTIONS = "predictions"  # kept by --force: the models' outputs of the run
 FORCE_FLAG = "--force"
 RUN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -46,16 +45,17 @@ class WarningCounter(logging.Handler):
         self.count += 1
 
 
-def setup_logging(folder: Path) -> WarningCounter:
-    """Log to `run.log` in the run folder and to stderr."""
+def setup_logging(folder: Path, file: bool = True) -> WarningCounter:
+    """Log to `run.log` in the run folder (if `file`) and to stderr."""
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%H:%M:%S")
-    fh = logging.FileHandler(folder / RUN_LOG)
-    sh = logging.StreamHandler(sys.stderr)
+    handlers = [logging.StreamHandler(sys.stderr)]
+    if file:
+        handlers.append(logging.FileHandler(folder / RUN_LOG))
     counter = WarningCounter()
-    for h in (fh, sh):
+    for h in handlers:
         h.setFormatter(fmt)
         root.addHandler(h)
     root.addHandler(counter)
@@ -79,6 +79,8 @@ def check_config(cfg: DictConfig) -> None:
         raise ValueError(f"steps must be a non-empty list of {list(STEPS)}, got {list(cfg.steps)}")
     if "truth" in cfg.models:
         raise ValueError("'truth' is reserved and cannot be a model name")
+    if cfg.only is not None and cfg.only not in cfg.models:
+        raise ValueError(f"only={cfg.only}: not one of the models {list(cfg.models)}")
     if cfg.output.on_missing not in ("warn", "error"):
         raise ValueError("output.on_missing must be 'warn' or 'error'")
     cat = steps.dataset_catalogue(cfg)
@@ -89,9 +91,13 @@ def check_config(cfg: DictConfig) -> None:
         raise ValueError("step perf needs a perf config, e.g. perf=single")
     if "predict" in cfg.steps and not any(m.get("model") for m in cfg.models.values()):
         raise ValueError("step predict: none of the models has a `model` class to run")
-    envs = {m.env for m in cfg.models.values() if m.get("model")}
-    if set(cfg.steps) & set(MODEL_STEPS) and len(envs) > 1:
-        raise ValueError(f"the models' classes need different envs {sorted(envs)}; run separately")
+    envs = {m.env for m in steps.selected(cfg).values() if m.get("model")}
+    one_job = "perf" in cfg.steps or not jobs.should_submit(cfg.site, cfg.steps)
+    if set(cfg.steps) & set(MODEL_STEPS) and len(envs) > 1 and one_job:
+        raise ValueError(
+            f"the models' classes need different envs {sorted(envs)}: they predict in one "
+            "process (perf, or site=local); run them separately"
+        )
     truth = OmegaConf.to_container(cfg.dataset.truth, resolve=False)
     if "score" in cfg.steps and "${paths.data}" in str(truth) and cfg.paths.data is None:
         raise ValueError(
@@ -116,14 +122,17 @@ def run_dir(cfg: DictConfig) -> Path:
     return folder
 
 
-def prepare_run_dir(cfg: DictConfig, folder: Path) -> None:
+def prepare_run_dir(cfg: DictConfig, folder: Path, workflow: bool = False) -> None:
     """A call with `predict` or `score` starts its run: an existing run folder is an
-    error, unless `force` (--force), which empties it but keeps the models' outputs:
-    `predictions/`, and the timings (`perf.csv`, `perf_meta_*.json`) unless this call runs
-    `perf` again. Jobs skip this: the call that submitted them did it."""
+    error (in-process; a `workflow` updates it), unless `force` (--force), which empties it
+    but keeps the models' outputs: `predictions/`, and the timings (`perf.csv`,
+    `perf_meta_*.json`) unless this call runs `perf` again. Jobs skip this: the call that
+    started them did it."""
     if jobs.in_job() or not {"predict", "score"} & set(cfg.steps):
         return
     if not folder.exists() or not any(folder.iterdir()):
+        return
+    if workflow and not cfg.force:
         return
     if not cfg.force:
         raise FileExistsError(
@@ -138,55 +147,6 @@ def prepare_run_dir(cfg: DictConfig, folder: Path) -> None:
             shutil.rmtree(p)
         else:
             p.unlink()
-
-
-def job_groups(cfg: DictConfig) -> list[tuple[list[str], str, str]]:
-    """(steps, resource kind, pixi env) per job: the model steps in one job on the runtime's
-    device in the models' env, then score/plot in a CPU job."""
-    todo = ordered(cfg.steps)
-    groups = []
-    model_steps = [s for s in todo if s in MODEL_STEPS]
-    if model_steps:
-        env = next((m.env for m in cfg.models.values() if m.get("model")), "default")
-        kind = "gpu" if str(cfg.runtime.device).startswith("cuda") else "cpu"
-        groups.append((model_steps, kind, env))
-    rest = [s for s in todo if s not in MODEL_STEPS]
-    if rest:
-        groups.append((rest, "cpu", "default"))
-    return groups
-
-
-def job_overrides(cfg: DictConfig, folder: Path, todo: list[str], models_file: Path | None):
-    """This call's overrides for a job: same choices, fixed folder, the job's steps."""
-    fixed = ("output.dir", "steps", "models_file", "force")
-    keep = [
-        o for o in HydraConfig.get().overrides.task if o.lstrip("+~").split("=")[0] not in fixed
-    ]
-    extra = [f"steps=[{','.join(todo)}]", f"output.dir={folder}"]
-    if models_file is not None:
-        extra.append(f"models_file={models_file}")
-    return [*keep, *extra]
-
-
-def submit(cfg: DictConfig, folder: Path) -> None:
-    """Submit the steps as jobs of the site, writing into `folder` (fixed now); a later job
-    starts only if the one before it succeeded."""
-    site = OmegaConf.to_container(cfg.site, resolve=True)
-    if not cfg.paths.snapshots:
-        raise ValueError(f"site '{site['name']}' submits jobs: set paths.snapshots=<dir>")
-    groups = job_groups(cfg)
-    for _, _, env in groups:
-        jobs.check_env(env)
-    snap = jobs.snapshot(io.resolve_path(cfg.paths.snapshots))
-    models_file = None
-    if cfg.models_file:
-        models_file = snap / MODELS_FILE
-        shutil.copy(models_file_path(cfg.models_file), models_file)
-    after = None
-    for todo, kind, env in groups:
-        command = ["python", "-m", "scimo_bench", *job_overrides(cfg, folder, todo, models_file)]
-        name = "-".join(todo)
-        after = jobs.submit(site, kind, env, command, folder, name, snap=snap, after=after)
 
 
 def run(cfg: DictConfig, folder: Path) -> None:
@@ -208,16 +168,18 @@ def bench(cfg: DictConfig) -> None:
     if not to_submit:
         jobs.guard(cfg.site, cfg.steps)
     folder = run_dir(cfg)
-    prepare_run_dir(cfg, folder)
+    prepare_run_dir(cfg, folder, workflow=to_submit)
     folder.mkdir(parents=True, exist_ok=True)
-    counter = setup_logging(folder)
+    counter = setup_logging(folder, file=cfg.only is None)  # a model's job: its own log
     log.info("scimo_bench steps=%s commit=%s", list(cfg.steps), jobs.git_commit())
     log.info("call: %s", " ".join(sys.argv[1:]))
     log.info("output: %s", folder)
     if to_submit:
-        submit(cfg, folder)
+        workflow.run(cfg, folder)
+        log.info("workflow done: %s", folder)
         return
     suffix = "" if "score" in cfg.steps else "." + "-".join(ordered(cfg.steps))
+    suffix += f"-{cfg.only}" if cfg.only is not None else ""
     (folder / f"resolved_config{suffix}.yaml").write_text(OmegaConf.to_yaml(cfg, resolve=True))
     run(cfg, folder)
     log.info("done: %s (%d warnings)", folder, counter.count)

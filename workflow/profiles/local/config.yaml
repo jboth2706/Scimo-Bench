@@ -1,0 +1,7 @@
+---
+# Snakemake profile `local`: the workflow's jobs run on this machine (dry runs, tests;
+# `site=raven site.profile=local`).
+cores: 4
+latency-wait: 5
+rerun-incomplete: true
+rerun-triggers: [mtime, params, input]

@@ -127,6 +127,7 @@ def hardware(rt: Runtime) -> dict:
             device_name=torch.cuda.get_device_name(0),
             gpu_count=torch.cuda.device_count(),
             cuda=torch.version.cuda,
+            hip=torch.version.hip,  # ROCm builds (Viper MI300A) report the GPU as "cuda"
             driver=_driver_version(),
         )
     else:

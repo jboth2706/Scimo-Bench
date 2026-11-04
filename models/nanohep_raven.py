@@ -1,16 +1,25 @@
-"""Models file: a nanoHEP run on Raven (models_file=nanohep_raven).
+"""Models file: nanoHEP runs on Raven (models_file=nanohep_raven).
 
-    ./run.sh site=raven run=depth_n6 models_file=nanohep_raven task=pflow \
-        'models=[depth_n6_muon]' steps=[predict,perf,score,plot] perf=single \
+    ./run.sh site=raven run=cont_split_n5 models_file=nanohep_raven task=pflow \
+        'models=[tok_n5_20M,cont_split_n5_20M]' steps=[predict,perf,score,plot] perf=single \
         cutflow=preselection
 """
 
 from scimo_bench.configs.models import add_model
 
+# trained on Viper (project HEP4M-20M-10ep), run folders copied to Raven
 add_model(
-    "depth_n6_muon",
+    "tok_n5_20M",
     type="nanohep",
-    label="nanoHEP n6 Muon",
-    checkpoint="/ptmp/jboth/runs/HEP4M-muon-vs-adamW-compute-opt/"
-    "pflow_depth_lr1e-3_n_layer6_muon/checkpoints/final.ckpt",
+    label="Method1",
+    checkpoint="/ptmp/jboth/runs/HEP4M-20M-10ep/nanohep_tok_n5_20M_10ep/checkpoints/final.ckpt",
+    # tokens from the continuous store (same events and objects as Tokenized_7mod)
+    options=dict(tokenized_root="/ptmp/jboth/COCOA/Continuous_7mod"),
+)
+add_model(
+    "cont_split_n5_20M",
+    type="nanohep_cont",
+    label="Method3",
+    checkpoint="/ptmp/jboth/runs/HEP4M-20M-10ep/nanohep_cont_split_n5_20M_10ep/"
+    "checkpoints/final.ckpt",
 )

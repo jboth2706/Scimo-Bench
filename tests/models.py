@@ -18,4 +18,5 @@ add_dataset(
 add_model("dummy")
 add_model("second")
 add_model("toy", model="tests.toy_model:ToyModel", family="regression")
+add_model("toy2", model="tests.toy_model:ToyModel", family="regression")
 add_model("nano", type="nanohep", checkpoint="/runs/n6/checkpoints/final.ckpt")

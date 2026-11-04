@@ -36,12 +36,16 @@ def dataset_catalogue(cfg: DictConfig) -> catalogue.Catalogue:
 
 
 def task_metrics(cfg: DictConfig, cat: catalogue.Catalogue) -> list[scorer.Metric]:
-    """The task's metrics, instantiated (unknown names are config errors)."""
+    """The task's metrics, instantiated (unknown names are config errors; the primary
+    metric of the ranking must be a ranked one)."""
     metrics = list(instantiate(cfg.task.metrics))
     for m in metrics:
         cat.check_name(m.variable, f"metric {m.name}")
         if m.x:
             cat.check_name(m.x, f"metric {m.name} x")
+    primary = (cfg.task.get("ranking") or {}).get("primary")
+    if primary and primary not in {m.name for m in metrics if m.rank}:
+        raise ValueError(f"task.ranking.primary '{primary}' is not a ranked metric of the task")
     return metrics
 
 
@@ -83,6 +87,13 @@ def required_fields(cfg: DictConfig) -> set[str]:
     for coll, fields in (cfg.dataset.get("collections") or {}).items():
         out |= {coll, *fields}
     return out
+
+
+def selected(cfg: DictConfig) -> dict:
+    """The models the model steps run: all, or only `cfg.only` (one job per model)."""
+    if cfg.get("only") is None:
+        return dict(cfg.models)
+    return {cfg.only: cfg.models[cfg.only]}
 
 
 def missing(cfg: DictConfig, msg: str, *args) -> None:
@@ -273,7 +284,7 @@ def run_models(cfg: DictConfig, folder: Path) -> None:
     task = OmegaConf.to_container(cfg.task, resolve=True)
     dataset = OmegaConf.to_container(cfg.dataset, resolve=True)
     rows, metas = [], {}
-    for name, mcfg in cfg.models.items():
+    for name, mcfg in selected(cfg).items():
         mcfg = OmegaConf.to_container(mcfg, resolve=True)
         if not mcfg.get("model"):
             log.info("%s: no `model` class; its prediction file is read as given", name)

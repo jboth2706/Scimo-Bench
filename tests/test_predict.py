@@ -46,7 +46,7 @@ def test_all_steps_predict_score_and_time(contract_dir, tmp_path):
     perf_rows = rep[(rep.kind == "perf") & rep.value.notna()]
     assert len(perf_rows) and set(perf_rows.status) == {"ok"}  # gate passed after scoring
     assert (tmp_path / "run" / "perf.csv").exists()
-    assert (tmp_path / "run" / "plots" / "response_vs_pt.png").exists()
+    assert (tmp_path / "run" / "plots" / "response_vs_e.png").exists()
 
 
 def test_failed_gate_and_known_shift(contract_dir, tmp_path):
@@ -87,22 +87,3 @@ def test_predict_needs_a_model_class(contract_dir, tmp_path):
     ov = synthetic_overrides(contract_dir, tmp_path, models=("ident",))  # dummy: files only
     proc = run_bench(*ov, "steps=[predict]", check=False)
     assert proc.returncode != 0 and "`model` class" in proc.stderr
-
-
-def test_cluster_chains_a_model_job_and_a_scoring_job(contract_dir, tmp_path, fake_slurm):
-    run = tmp_path / "run"
-    run_bench(
-        *overrides(contract_dir, tmp_path, ALL, "perf=smoke", "site=raven"),
-        "site.node_local=[]",
-        f"paths.snapshots={tmp_path}/s",
-        env=fake_slurm,
-    )
-    sub = pd.read_csv(run / "jobs.csv", dtype=str)
-    assert list(sub.name) == ["predict-perf", "score-plot"]
-    assert sub.after.fillna("").tolist() == ["", "12345"]
-    assert sub.snapshot.nunique() == 1 and set(sub.kind) == {"cpu"}  # runtime=cpu
-    calls = (tmp_path / "sbatch.log").read_text().splitlines()
-    assert "--dependency" not in calls[0] and "--dependency=afterok:12345" in calls[1]
-    assert "steps=[predict,perf]" in (run / "job-predict-perf.sh").read_text()
-    assert "steps=[score,plot]" in (run / "job-score-plot.sh").read_text()
-    assert not (tmp_path / "preds").exists()  # nothing ran yet

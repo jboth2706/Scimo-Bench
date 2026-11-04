@@ -1,0 +1,30 @@
+---
+# Snakemake profile of site `viper` (MPCDF, MI300A APUs): job resources of the workflow.
+# Start the workflow on an APU login node (viper11-13) from the env in
+# /viper/u2/$USER/scimo-bench-env: the apu partition takes jobs only from there, and the
+# jobs' Snakemake runs with the controller's Python, which compute nodes must see.
+executor: slurm
+jobs: 16
+latency-wait: 60
+rerun-incomplete: true
+rerun-triggers: [mtime, params, input]
+slurm-logdir: logs/slurm
+# `small` (QOS n0001) is often full by the group's CPU limit: CPU jobs take an apu node too;
+# the apu partition refuses jobs without a GPU (Access/permission denied), so they ask for one
+default-resources:
+  slurm_account: mpp_apu
+  slurm_partition: apu
+  gres: gpu:1
+  runtime: 30
+  mem_mb: 16000
+  cpus_per_task: 4
+set-resources:
+  # an apu node is exclusive; a model job uses one of its two APUs
+  predict: &gpu
+    cpus_per_task: 24
+    mem_mb: 100000
+  # perf times every model in turn (more models: +site.set_resources.perf.runtime=<minutes>)
+  perf:
+    <<: *gpu
+    runtime: 120
+  command_gpu: *gpu

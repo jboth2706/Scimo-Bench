@@ -10,8 +10,8 @@ metrics and plots apply; each dataset defines its observables, comparisons and p
 functions, and the core modules cut, compute metrics and draw. Several models run in one call and appear in the same plots. A fifth, optional
 module measures inference performance. Quality and cost are combined on Pareto fronts.
 
-M0, M1 and M3–M7 are built (status in README.md); M2 (the nanoHEP protocol class in
-hep4m_scimo) and the GPU measurement are open.
+M0, M1, M3–M8 are built (status in README.md; M8: the cluster steps as a Snakemake
+workflow); M2 (the nanoHEP protocol class in hep4m_scimo) and the GPU measurement are open.
 **Continue milestone by milestone
 following `docs/PLAN.md`; each milestone has its own brief in `docs/tasks/M<n>.md`.**
 
@@ -19,7 +19,7 @@ following `docs/PLAN.md`; each milestone has its own brief in `docs/tasks/M<n>.m
 
 | File | What it holds |
 |------|---------------|
-| `docs/PLAN.md` | MVP goal, scope, milestones M0–M7 with acceptance criteria, open decisions |
+| `docs/PLAN.md` | MVP goal, scope, milestones M0–M8 with acceptance criteria, open decisions |
 | `docs/DESIGN.md` | architecture, config groups, outputs, performance rules, Pareto front |
 | `docs/CONTRACT.md` | the prediction contract v1 — the file format of predictions |
 | `docs/PROTOCOL.md` | the model protocol — the class through which scimo-bench runs a model |
@@ -41,7 +41,9 @@ following `docs/PLAN.md`; each milestone has its own brief in `docs/tasks/M<n>.m
 ## Invariants (do not break)
 
 1. **Configs are pure Python (hydra-zen).** `builds`, `make_config`, `store`; no YAML config
-   files. The resolved config is still written as `resolved_config.yaml` per run.
+   files. The resolved config is still written as `resolved_config.yaml` per run. The one
+   exception is execution config: the Snakemake profiles `workflow/profiles/<site>/config.yaml`
+   (job resources) are YAML; they hold nothing the benchmark reads.
 2. **The model/benchmark boundary is in physical space.** The benchmark reads events and
    objects in physical units (GeV, rad) keyed by `event_id`. It never sees tokens,
    vocabularies or checkpoints. Model-family details live in `meta`.
@@ -87,14 +89,19 @@ pixi run precommit                # all pre-commit hooks (ruff, yamlfix, yamllin
 # models files: models/nanohep_raven.py (models_file=nanohep_raven), or a path
 ./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' cutflow=preselection  # score+plot
 ./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' \
-    steps=[predict,perf,score,plot] perf=single                # GPU job, then CPU job
+    steps=[predict,perf,score,plot] perf=single                # Snakemake: GPU jobs, then CPU jobs
 ./run.sh site=raven run=<name> models_file=<file> task=pflow 'models=[a,b]' steps=[plot] plots=pareto
 ```
 
 ## Cluster rules (Raven, MPCDF)
 
 - Never run training or GPU work on the login node. GPU measurements (M2 predictions, M6
-  perf) run as sbatch jobs (1× A100, short time limits, code from a frozen snapshot).
-  `site=raven` does this for every benchmark call (`scimo_bench/jobs.py`); without it the
-  benchmark refuses every step but `plot` on a login node.
+  perf) run as Slurm jobs (1× A100, short time limits, code from a frozen snapshot).
+  `site=raven` does this for every benchmark call: a Snakemake workflow
+  (`scimo_bench/workflow.py`, `workflow/Snakefile`) with the resources of
+  `workflow/profiles/raven/config.yaml`; only its light controller runs on the login node,
+  in the foreground (tmux for long runs). Without a site the benchmark refuses every step
+  but `plot` on a login node.
+- Viper: start the workflow on viper11–13 (apu partition, AllocNodes) from the env in
+  `/viper/u2/$USER/scimo-bench-env`; compute nodes do not see `/raven`.
 - Data lives on `/ptmp/jboth/...` (see `docs/HEP4M_CONTEXT.md`); do not copy it into the repo.

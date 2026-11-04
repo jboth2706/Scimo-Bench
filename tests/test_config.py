@@ -94,8 +94,11 @@ def test_task_metrics_and_plots_instantiate():
     assert all(isinstance(m, Metric) for m in metrics)
     by_name = {m.name: m for m in metrics}
     assert isinstance(by_name["response_iqr"], IQR)
-    assert by_name["response_iqr"].binning == pytest.approx(list(range(0, 201, 20)))
+    assert by_name["response_iqr"].x == "truth.jet_e"
+    assert by_name["response_iqr"].binning == pytest.approx(list(range(20, 201, 20)))
     assert by_name["response_median"].better == {"closest_to": 1.0}
+    assert by_name["response_iqr"].rank and not by_name["response_iqr_vs_n"].rank
+    assert by_name["response_iqr_vs_n"].binning[-2:] == [15.5, 27.5]
     plots = bench_steps.plot_objects(c, cat)
     assert plots[0] is cat.plots["jet_e_response"] and plotter.ranking in plots
     assert isinstance(plots[-1], ParetoPlot) and plots[-1].x == "latency_p50"
@@ -157,7 +160,7 @@ def test_dataset_brings_its_reader_and_catalogue():
     cat = catalogue.load(c.dataset.module)
     assert {"jet_e", "n_tracks"} <= set(cat.observables)
     assert {"jet_e_response", "jet_dr"} <= set(cat.comparisons)
-    assert {"jet_e", "response_vs_pt"} <= set(cat.plots)
+    assert {"jet_e", "response_vs_e"} <= set(cat.plots)
     s = cfg("task=pflow", "dataset=synthetic")
     assert s.dataset.truth._target_.endswith("ContractTruth")
     assert s.dataset.module == c.dataset.module
@@ -168,5 +171,7 @@ def test_metric_and_param_names_are_checked():
     cat = bench_steps.dataset_catalogue(c)
     with pytest.raises(ValueError, match="truth.jet_pt or reco.jet_pt"):
         bench_steps.task_metrics(c, cat)
+    with pytest.raises(ValueError, match="not a ranked metric"):
+        bench_steps.task_metrics(cfg("task=pflow", "task.ranking.primary=response_iqr_vs_n"), cat)
     with pytest.raises(ValueError, match=r"task.params \['match_r'\]"):
         bench_steps.check_params(cfg("task=pflow", "+task.params.match_r=0.1"), cat)

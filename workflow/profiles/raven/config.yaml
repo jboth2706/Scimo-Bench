@@ -1,0 +1,32 @@
+---
+# Snakemake profile of site `raven` (MPCDF): job resources of the scimo-bench workflow.
+# Rules: predict (one job per model), perf, score, plot, command; with runtime=cpu the model
+# steps run as predict_cpu / perf_cpu with the default (CPU) resources.
+executor: slurm
+jobs: 16
+latency-wait: 60
+rerun-incomplete: true
+rerun-triggers: [mtime, params, input]
+slurm-logdir: logs/slurm
+# Partitions are explicit: without one the Slurm executor takes the default partition
+# (`interactive`: the login-like nodes raven05/06), where sbatch alone would route to these.
+# shared CPU node; the quality path is single-threaded
+default-resources:
+  slurm_partition: small
+  runtime: 30
+  mem_mb: 16000
+  cpus_per_task: 4
+set-resources:
+  # one of the four A100s of a shared GPU node (a quarter of its CPUs and memory)
+  predict: &gpu
+    slurm_partition: gpu
+    constraint: gpu
+    gres: gpu:a100:1
+    cpus_per_task: 18
+    mem_mb: 125000
+  # perf times every model in turn (perf=single: ~20 min per model on an A100); more models:
+  # +site.set_resources.perf.runtime=<minutes>
+  perf:
+    <<: *gpu
+    runtime: 120
+  command_gpu: *gpu

@@ -74,6 +74,7 @@ BenchConfig = make_config(
     ),
     models_file=None,
     steps=["score", "plot"],
+    only=None,  # the one model the model steps run (set per job by the workflow)
     hydra=dict(run=dict(dir="."), output_subdir=None, job=dict(chdir=False)),
 )
 

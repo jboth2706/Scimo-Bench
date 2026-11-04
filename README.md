@@ -11,8 +11,8 @@ bootstrap), measures what each model costs to run, and combines both on Pareto f
   SciMo-Bench runs (`docs/PROTOCOL.md`), or as a prediction file (`docs/CONTRACT.md`).
 
 Configs are pure Python ([hydra-zen](https://github.com/mit-ll-responsible-ai/hydra-zen));
-everything is set on the command line. On a cluster, each call is submitted as small CPU /
-GPU jobs; nothing heavy runs on the login node. "SciMo-Bench" is a working name.
+everything is set on the command line. On a cluster, each call runs as a Snakemake workflow
+of small CPU / GPU jobs; nothing heavy runs on the login node. "SciMo-Bench" is a working name.
 
 ---
 
@@ -31,7 +31,7 @@ The `perf` environment installs the model packages as editable sibling checkouts
 
 **2. List your models** in a models file. The nanoHEP runs on Raven are in
 `models/nanohep_raven.py` (pass it as `models_file=nanohep_raven`; for now it registers one
-run, `depth_n6_muon`). For other models, add a file
+run, `cont_split_n5_20M`, a nanoHEP with continuous inputs). For other models, add a file
 to `models/` or keep one of your own and pass its path:
 
 ```python
@@ -91,7 +91,7 @@ ls /ptmp/$USER/bench/outputs/n6_vs_hgpflow/plots               # PDF
 | model code, training, checkpoints | the task: events, cuts, metrics, plots |
 | the model's own input data (e.g. tokenized events) | runs your class over those events, times it |
 | one class turning the model's output (tokens, bins, normalized values) into floats | compares with the truth; reports, rankings, plots, Pareto fronts |
-| | submits the work as cluster jobs |
+| | runs the work as a Snakemake workflow of cluster jobs |
 
 Only floats per event cross the boundary: `event_id` plus each object's fields in physical
 units (for COCOA: `particles.pt, eta, phi, e` in GeV and rad). SciMo-Bench never sees tokens,
@@ -128,12 +128,22 @@ gate (`pflow`: jet-energy-response IQR ≤ 0.25); otherwise they are marked `inv
 | `site=` | Behaviour |
 |---------|-----------|
 | `local` (default) | everything in-process (laptop, or inside an `salloc` shell) |
-| `raven` | `predict`/`perf` as one job on the runtime's device (1× A100), then `score`/`plot` as a CPU job that starts only if the first succeeded; the call returns at once (`site.wait=true` blocks) |
+| `raven` | a Snakemake workflow of Slurm jobs: `predict` one job per model on the runtime's device (1× A100), `perf` one job for all models, then `score` and `plot` as CPU jobs; the call blocks until the workflow ends (long runs in tmux) |
+| `viper` | the same on Viper (one MI300A APU, ROCm); start it on an APU login node (`viper11`–`13`) from the env `/viper/u2/$USER/scimo-bench-env` (it needs Snakemake: `pixi install` there with this `pixi.toml`). Compute nodes cannot see `/raven`: the model env is hep4m_scimo's `/viper/u2/$USER/scimo-rocm`, the default env a copy of this `pixi.toml` in `/viper/u2/$USER/scimo-bench-env`, the producer packages (`../scimo/src/hep4m_scimo`, `../nanoHEP/hep4m`) are copied into the snapshot; data and outputs under `/viper/ptmp2/$USER`. Models: `models_file=nanohep_viper` |
 
-Before submitting, the call prepares the run folder and copies the code and your models file
-to a snapshot, so later edits do not change queued jobs. Job scripts, Slurm logs and job ids
-(`jobs.csv`) land in the run folder. On a login node of a known cluster, every step except
-`plot` is refused unless you pass the site ("add site=raven").
+Before the jobs start, the call prepares the run folder and copies the code and your models
+file to a snapshot, so later edits do not change queued jobs. Job scripts (`jobs/`), logs
+(`logs/`, Slurm logs in `logs/slurm/`) and the workflow config (`workflow.json`) land in the
+run folder. The job resources are the site's Snakemake profile
+(`workflow/profiles/<site>/config.yaml`); for one call,
+`+site.set_resources.predict.slurm_partition=gpudev +site.set_resources.predict.runtime=15`
+changes them (merged into the profile), and `'site.snakemake_args=[-n]'` passes more Snakemake
+options (`-n`: a dry run that shows the jobs and their resources, submits nothing). Calling again into an existing run reruns only
+what is missing or changed: a new model in `models=[...]` is predicted alone, a changed
+model, cutflow or task reruns the steps that read it; `--force` reruns everything requested
+(e.g. after a code change). If the call is interrupted (the jobs keep running), call again:
+Snakemake picks up the run. On a login node of a known cluster, every step except `plot` is
+refused unless you pass the site ("add site=raven").
 
 ---
 
@@ -144,8 +154,8 @@ to a snapshot, so later edits do not change queued jobs. Job scripts, Slurm logs
 | Setting | Meaning | Default |
 |---------|---------|---------|
 | `run=` | the run's name: its folder is `<paths.outputs>/<name>/` | required |
-| `--force` | overwrite an existing run (its `predictions/` and timings are kept) | off |
-| `site=` | `local` or `raven` | `local` |
+| `--force` | overwrite an existing run (its `predictions/` and timings are kept); on a cluster site, rerun every requested step | off |
+| `site=` | `local`, `raven` or `viper` | `local` |
 | `paths.data` | data root; the dataset's truth file is found below it | raven: `/ptmp/$USER`; local: none |
 | `paths.outputs` | where the run folders are | raven: `/ptmp/$USER/bench/outputs`; local: `outputs` |
 | `paths.snapshots` | code copies for jobs | raven: `/ptmp/$USER/bench/snapshots` |
@@ -170,9 +180,11 @@ Any value can be overridden, e.g. `paths.data=/elsewhere`,
 model, checkpoint, options, env, color, linestyle` (`scimo_bench/configs/models.py`); a
 typo is an error. `predictions` defaults to `<run>/predictions/<model>`; point it at another
 run's folder (`predictions=/ptmp/$USER/bench/outputs/<other run>/predictions/<model>`) to
-score predictions made before without rerunning the model. A type gives defaults: `files` (only a prediction file) or `nanohep`
-(protocol class `examples.nanohep_model:NanoHEP`, argmax generation, env `perf`); `add_type(...)`
-adds one.
+score predictions made before without rerunning the model. A type gives defaults: `files`
+(only a prediction file), `nanohep` (protocol class `examples.nanohep_model:NanoHEP`: topo
+clusters and tracks as tokens) or `nanohep_cont` (`examples.nanohep_cont_model:NanoHEPCont`:
+topo clusters and tracks as continuous features, hep4m_scimo `pflow_cont/*`); both with argmax
+generation, env `perf`. `add_type(...)` adds one.
 
 ### The run folder
 
@@ -182,13 +194,13 @@ adds one.
 |------|-------|
 | `predictions/<model>/` | each model's predictions (Parquet + `meta.json`, `docs/CONTRACT.md`) |
 | `report.csv` | every metric per model and bin: value, 95 % interval, status; gated perf rows |
-| `rankings.csv` | rank per metric, mean rank, primary metric |
+| `rankings.csv` | rank per ranked metric, mean rank, primary metric |
 | `cutflow.csv` | events and objects kept after each step, per model |
 | `per_event.parquet` | every observable (truth and reco) and comparison per event, for plots and later analysis |
 | `perf.csv` | timings as measured, before the gate |
 | `pareto.csv` | quality-vs-cost points, on the front or not |
 | `plots/` | PDF (`output.formats=[pdf,png]` adds PNG) |
-| `run.log`, `jobs.csv`, `job-*.sh`, `job-*.out` | commit, warnings, jobs |
+| `run.log`, `logs/`, `jobs/`, `status/`, `workflow.json` | commit, warnings; on a cluster site: logs per job, job scripts, step markers, workflow config |
 | `resolved_config*.yaml` | the full configuration used |
 
 **Statuses**: `ok`; `missing` (a model without predictions, a quantity lacking an input
@@ -239,6 +251,21 @@ scimo_bench/datasets/common.py   physics helpers any dataset can use (jet, ΔR, 
 | models must output | `particles: [pt, eta, phi, e]` (`configs/datasets.py`) |
 | tracks | an input of the models, so they exist in the truth only |
 
+**Task `pflow`** (`configs/tasks.py`). The jet is the vector sum of all particles of the
+event; classes are charged hadrons (h±, with the few e and μ), neutral hadrons (h⁰), photons.
+
+| | |
+|---|---|
+| distributions | E, η, φ, mass response of the jet (`jet_e_response`, `jet_deta`, `jet_dphi`, `jet_m_response`), ΔR(reco jet, truth jet), E_reco / E_truth per class, multiplicities (all, per class) and their differences |
+| ranked metrics | median and IQR of the E response (binned in truth jet E), of Δη (in truth jet η), Δφ (in truth jet E); mean and std of the class energy responses and of N_reco − N_truth (all, per class) |
+| reported only (`rank=False`) | E response median / IQR binned in N_truth particles, charged and neutral-hadron energy fraction, number of tracks, track width (pT-weighted ΔR of all tracks to the truth jet axis); Δη in truth jet E; median / IQR of the class energy responses |
+| quality gate, primary | `response_iqr` (≤ 0.25) |
+
+The jet mass uses each particle's `e`; m² < 0 (a model's energy below its momentum) is
+clipped to 0. The mass response is drawn, but not yet a metric: for ~40 % of the nanoHEP
+jets the reco mass is 0 (energies decoded independently of pT, η). A ratio with a zero truth denominator (no photon in the event, ...) gives no
+value for that event.
+
 A new dataset: a package like `cocoa/` (its `__init__.py` has
 `CATALOGUE = Catalogue.collect(observables, comparisons, plots)`) and one `add_dataset(...)`
 call in `scimo_bench/configs/datasets.py`.
@@ -255,11 +282,8 @@ one on the truth **and** on every model's output (reco), so you write it once:
 
 ```python
 @observable(label="jet mass", unit="GeV")
-def jet_mass(ev):
-    pt, eta, phi = f64(ev.particles.pt), f64(ev.particles.eta), f64(ev.particles.phi)
-    e, px, py, pz = pt * np.cosh(eta), pt * np.cos(phi), pt * np.sin(phi), pt * np.sinh(eta)
-    s = lambda x: ak.to_numpy(ak.sum(x, axis=1))
-    return np.sqrt(np.maximum(s(e) ** 2 - s(px) ** 2 - s(py) ** 2 - s(pz) ** 2, 0))
+def jet_m(ev):
+    return jet_mass(ev.particles)  # helper in datasets/common.py
 
 
 @observable(label="tracks per event")
@@ -278,8 +302,8 @@ def n_tracks(ev):
 
 ```python
 @comparison(label=r"$m_\mathrm{reco} / m_\mathrm{truth}$ (jet)", reference=1.0)
-def jet_mass_response(truth, reco):
-    return ratio(jet_mass(reco), jet_mass(truth))
+def jet_m_response(truth, reco):
+    return ratio(jet_m(reco), jet_m(truth))
 
 
 @comparison(label=r"$\Delta R$(reco jet, truth jet)", reference=0.0)
@@ -289,8 +313,9 @@ def jet_dr(truth, reco, max_dr=None):  # a task parameter: task.params.max_dr=0.
     return dr if max_dr is None else np.minimum(dr, max_dr)
 ```
 
-- A comparison may call observables (`jet_mass(reco)`) and the helpers in
-  `datasets/common.py` (`jet`, `energy_sum`, `delta_phi`, `ratio`, `counts`, `flat`, ...).
+- A comparison may call observables (`jet_m(reco)`) and the helpers in
+  `datasets/common.py` (`jet`, `jet_mass`, `energy_sum`, `delta_phi`, `ratio`, `counts`,
+  `flat`, ...).
 - Task parameters are keyword arguments with a default; the task's `params` override them
   (as in the sketch above). A parameter no comparison has is a configuration error.
 - `reference` is the ideal value (drawn as a dotted line). Let the label say which side
@@ -305,16 +330,19 @@ Every observable and comparison is computed in every `score` step and stored in
   ```python
   builds(
       Median,
-      name="jet_mass_response",
-      variable="jet_mass_response",
+      name="mass_response_median",
+      variable="jet_m_response",
       better=dict(closest_to=1.0),
       x="truth.jet_pt",
-      binning=JET_PT,
+      binning=binning("jet_pt"),  # task.binnings.jet_pt
   )
-  builds(Mean, name="n_particles_reco", variable="reco.n_particles")
+  builds(Mean, name="n_particles_reco", variable="reco.n_particles", rank=False)
   ```
   Metrics: `Median`, `IQR`, `Mean`, `Std`, `Quantile`
   (`scimo_bench/scorer.py`). A plain observable name without `truth.` / `reco.` is an error.
+  `rank=False`: in `report.csv`, but not in the rankings (e.g. a second binning of a ranked
+  metric, whose overall value would count twice). `median_iqr(...)` and `mean_std(...)` in
+  `configs/tasks.py` build the usual pairs.
 
 ---
 
@@ -381,9 +409,9 @@ Every plot is one function in the dataset's `plots.py`, saved as
 
 ```python
 @plot
-def jet_mass(p):
+def jet_m(p):
     fig, ax, rax = p.figure(ratio=True)  # p.figure() without a ratio panel: fig, ax
-    p.hist(ax, "jet_mass", np.linspace(0, 100, 51), ratio_ax=rax)
+    p.hist(ax, "jet_m", np.linspace(0, 100, 51), ratio_ax=rax)
     p.legend(ax)
     return fig
 ```
@@ -394,6 +422,7 @@ def jet_mass(p):
 |--------|-------|
 | `p.hist(ax, name, bins, ratio_ax=None, truth=True, models=None)` | an observable: truth (grey) and each model's reco output (lines), ratio reco / truth; a comparison: one line per model |
 | `p.metric_vs_x(ax, metric, log_x=False)` | a binned metric from `report.csv` against its x, with interval bands |
+| `p.figure(panels=2)` → `fig, (top, bottom)` | panels on a shared x axis, e.g. median above IQR (`median_iqr` in `cocoa/plots.py`) |
 | `p.legend(ax)`, `p.log_x(ax)`, `p.figure(...)` | legend above the axes, log axis, figure in the run's style |
 | `p.values(side, name)`, `p.models`, `p.styles[model]`, `p.label(model)`, `p.report` | the raw material for anything custom (plain matplotlib on `ax`) |
 
@@ -418,7 +447,7 @@ scimo-bench/
 ├── run.sh                    entry point: ./run.sh <hydra overrides>
 ├── pixi.toml, pixi.lock      environments: default (scoring), perf (torch + model code)
 ├── scimo_bench/
-│   ├── main.py               loads the models file, composes the config, runs or submits
+│   ├── main.py               loads the models file, composes the config, runs or starts the workflow
 │   ├── steps.py              the steps predict/perf, score, plot (each works on files)
 │   ├── configs/              hydra-zen config groups (below)
 │   ├── datasets/             eval datasets (cocoa/: reader, observables, comparisons, plots)
@@ -430,7 +459,9 @@ scimo-bench/
 │   ├── cutflow.py            cuts (plain functions on a collection)
 │   ├── scorer.py             metrics, paired bootstrap, statuses, rankings
 │   ├── plotter.py            plots, style, Pareto fronts (no physics)
-│   └── jobs.py               login-node guard, job scripts, submission, code snapshots
+│   ├── jobs.py               login-node guard, job scripts, code snapshots
+│   └── workflow.py           a cluster site's steps as a Snakemake workflow
+├── workflow/                 Snakefile; profiles/<site>/config.yaml (job resources per site)
 ├── data/                     event lists of the tasks (versioned with the task)
 ├── examples/                 example models file
 ├── docs/                     PLAN, DESIGN, PROTOCOL, CONTRACT, task briefs per milestone
@@ -441,7 +472,7 @@ scimo-bench/
 
 | Group | Chooses | Options |
 |-------|---------|---------|
-| `site` | where it runs, default paths, job resources | `local`, `raven` |
+| `site` | where it runs, default paths, environments (job resources: `workflow/profiles/`) | `local`, `raven`, `viper` |
 | `task` | events, metric definitions, binning, default plots, quality gate | `pflow` |
 | `dataset` | truth reader, package of observables/comparisons/plots, required fields | `cocoa` |
 | `models` | from your models file | yours |
@@ -451,8 +482,10 @@ scimo-bench/
 | `plots` (+ `plots/pareto`) | which plots, style, Pareto plot | `default`, `pareto` |
 | `output` | run folder, bootstrap size, warn or stop on gaps | `default` |
 
-A new cluster is one `site_conf(...)` entry in `configs/sites.py` (Slurm); a new task is
-one entry in `configs/tasks.py`.
+A new cluster is one `site_conf(...)` entry in `configs/sites.py` (paths, environments) and
+one Snakemake profile `workflow/profiles/<site>/config.yaml` (executor, job resources: the
+rules `predict`, `perf` and `command_gpu` get the GPU resources); a new task is one entry in
+`configs/tasks.py`.
 
 ### Design rules
 
@@ -469,7 +502,7 @@ aborts the run. Results are files, and plots can be redrawn from them. Details i
 
 ```bash
 pixi run test            # all tests, in-process (~2 min); real-data tests skip without /ptmp
-pixi run test-job raven  # the same tests as a CPU job
+pixi run test-job raven  # the same tests as a CPU job of the workflow (blocks)
 pixi run lint            # ruff check + format check
 pixi run precommit       # all pre-commit hooks (ruff, yamlfix, yamllint); `pixi run pre-commit install` once per clone
 pixi run fmt             # format

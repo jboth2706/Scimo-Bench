@@ -22,10 +22,19 @@ pytest = ">=8.0,<9"
 ruff = ">=0.5"
 pre-commit = ">=4.3.0,<5"
 
+# Workflow (cluster sites): Snakemake and its Slurm executor; PyPI only (not on conda-forge).
+# Not in the perf env: a job's Snakemake runs with the controller's Python (default env).
+[feature.workflow.dependencies]
+packaging = "<26"  # snakemake 9 needs packaging<26
+
+[feature.workflow.pypi-dependencies]
+snakemake = ">=9.20,<10"
+snakemake-executor-plugin-slurm = ">=2.5,<3"
+
 [tasks]
 test = { cmd = "pytest", env = { OPENBLAS_NUM_THREADS = "1", OMP_NUM_THREADS = "1" } }
-# the suite as a CPU job of a site profile: `pixi run test-job raven`
-test-job = { cmd = "python -m scimo_bench.jobs {{ site }} -- pytest", args = ["site"] }
+# the suite as a CPU job of a site's workflow (blocks): `pixi run test-job raven`
+test-job = { cmd = "python -m scimo_bench.workflow {{ site }} -- pytest", args = ["site"] }
 lint = "ruff check . && ruff format --check ."
 fmt = "ruff format . && ruff check --fix ."
 precommit = "pre-commit run --all-files"
@@ -60,4 +69,5 @@ vector-quantize-pytorch = "==1.25.2"
 einops = ">=0.8"
 
 [environments]
+default = ["workflow"]
 perf = ["perf"]

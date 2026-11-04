@@ -1,0 +1,118 @@
+"""The steps of a scimo-bench call as a Snakemake workflow.
+
+`scimo_bench/workflow.py` starts it in the run folder, from the code snapshot, with the site's
+profile (`workflow/profiles/<site>`) and the call's `workflow.json` as config. Every job runs
+its script `jobs/<step>[-<model>].sh` (written by `workflow.py`), which calls the benchmark
+in-process for that one step. Imports nothing from scimo_bench.
+
+    predict-<model> (one job per model) ─┐
+    perf (all models, one job)          ─┴─► score ─► plot
+
+Only the requested `steps` are rules; a step reruns when it is missing, when a step before
+it finished later, or when its config hash changed (`--forcerun` reruns it anyway).
+"""
+
+import re
+
+STEPS = config["steps"]
+PREDICT = config["predict"]  # model -> hash of its config, for each model with a class
+HASH = config["hash"]  # step -> hash of the config it reads
+SUFFIX = "" if config["gpu"] else "_cpu"  # model steps on a CPU: default resources
+
+
+def done(step):
+    """The marker a step's job touches when it succeeded."""
+    return f"status/{step}.done"
+
+
+def targets():
+    out = [done(f"predict-{m}") for m in PREDICT] if "predict" in STEPS else []
+    out += [done(s) for s in ("perf", "score", "plot") if s in STEPS]
+    return out + ([done("command")] if config.get("command") else [])
+
+
+localrules:
+    all,
+
+
+rule all:
+    input:
+        targets(),
+
+
+if "predict" in STEPS:
+
+    rule:
+        name:
+            "predict" + SUFFIX
+        output:
+            touch(done("predict-{model}")),
+        params:
+            config=lambda w: PREDICT[w.model],
+        wildcard_constraints:
+            model="|".join(re.escape(m) for m in PREDICT),
+        log:
+            "logs/predict-{model}.log",
+        shell:
+            "jobs/predict-{wildcards.model}.sh > {log} 2>&1"
+
+
+if "perf" in STEPS:
+
+    rule:
+        name:
+            "perf" + SUFFIX
+        output:
+            touch(done("perf")),
+        params:
+            config=HASH.get("perf"),
+        log:
+            "logs/perf.log",
+        shell:
+            "jobs/perf.sh > {log} 2>&1"
+
+
+if "score" in STEPS:
+
+    # after perf: both write report.csv (score merges the timings, perf gates them)
+    rule score:
+        input:
+            [done(f"predict-{m}") for m in PREDICT] if "predict" in STEPS else [],
+            [done("perf")] if "perf" in STEPS else [],
+        output:
+            touch(done("score")),
+        params:
+            config=HASH.get("score"),
+        log:
+            "logs/score.log",
+        shell:
+            "jobs/score.sh > {log} 2>&1"
+
+
+if "plot" in STEPS:
+
+    rule plot:
+        input:
+            [done("score")] if "score" in STEPS else [],
+        output:
+            touch(done("plot")),
+        params:
+            config=HASH.get("plot"),
+        log:
+            "logs/plot.log",
+        shell:
+            "jobs/plot.sh > {log} 2>&1"
+
+
+if config.get("command"):
+
+    # any command as one job (`python -m scimo_bench.workflow <site> -- <command>`)
+    rule:
+        name:
+            "command" + ("_gpu" if config["gpu"] else "")
+        output:
+            touch(done("command")),
+        log:
+            "logs/command.log",
+        shell:
+            "jobs/command.sh > {log} 2>&1"

@@ -187,6 +187,18 @@ def test_rankings(truth):
     assert list(rk.columns) == scorer.RANKING_COLUMNS
 
 
+def test_unranked_metrics_are_reported_not_ranked(truth):
+    preds = {"good": synthetic.smeared(truth, 0.05, seed=1), "bad": synthetic.identical(truth)}
+    metrics = [
+        IQR("iqr", "jet_e_response"),
+        IQR("iqr_vs_pt", "jet_e_response", x="truth.jet_pt", binning=EDGES, rank=False),
+    ]
+    _, res = score(truth, preds, metrics, n_boot=5)
+    assert "iqr_vs_pt" in set(res.report["metric"])
+    rk = scorer.rank(res.report, metrics)
+    assert set(rk["metric"]) == {"iqr", "mean_rank"}
+
+
 def test_normalized_score(truth):
     preds = {
         "base": synthetic.smeared(truth, 0.3, seed=1),

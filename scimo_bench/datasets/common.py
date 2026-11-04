@@ -1,4 +1,4 @@
-"""Physics helpers shared by datasets: jets, ΔR and array conversions.
+"""Physics helpers shared by datasets: jets, jet mass, ΔR and array conversions.
 
 Inputs are awkward arrays of objects (jagged: a list per event) with fields such as `pt`,
 `eta`, `phi`; outputs are numpy arrays (one value per event) or jagged arrays.
@@ -52,12 +52,18 @@ def delta_phi(a, b):
     return np.arctan2(np.sin(d), np.cos(d))
 
 
-def jet(objs: ak.Array) -> dict[str, np.ndarray]:
-    """Massless vector sum of all objects of each event: `pt`, `eta`, `phi` per event."""
+def _p_sum(objs: ak.Array) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Summed momentum (px, py, pz) of the objects of each event."""
     pt, eta, phi = f64(objs.pt), f64(objs.eta), f64(objs.phi)
     px = ak.to_numpy(ak.sum(pt * np.cos(phi), axis=1))
     py = ak.to_numpy(ak.sum(pt * np.sin(phi), axis=1))
     pz = ak.to_numpy(ak.sum(pt * np.sinh(eta), axis=1))
+    return px, py, pz
+
+
+def jet(objs: ak.Array) -> dict[str, np.ndarray]:
+    """Massless vector sum of all objects of each event: `pt`, `eta`, `phi` per event."""
+    px, py, pz = _p_sum(objs)
     jpt = np.hypot(px, py)
     safe = np.where(jpt == 0, 1e-10, jpt)
     return dict(pt=jpt, eta=np.arcsinh(pz / safe), phi=np.arctan2(py, px))
@@ -66,3 +72,10 @@ def jet(objs: ak.Array) -> dict[str, np.ndarray]:
 def energy_sum(objs: ak.Array) -> np.ndarray:
     """Sum of the objects' energies per event."""
     return ak.to_numpy(ak.sum(f64(objs.e), axis=1))
+
+
+def jet_mass(objs: ak.Array) -> np.ndarray:
+    """Mass of the four-vector sum (energies `e`) per event; 0 where m² < 0."""
+    px, py, pz = _p_sum(objs)
+    m2 = energy_sum(objs) ** 2 - (px**2 + py**2 + pz**2)
+    return np.sqrt(np.maximum(m2, 0.0))

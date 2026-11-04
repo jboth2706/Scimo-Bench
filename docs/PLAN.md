@@ -32,7 +32,7 @@ n6 Muon from the multi-epoch sweep; afterwards the depth scaling n5–n8.
 
 ## Milestones
 
-Dependencies: M0 → M1 → {M2, M3}; M3 → M4 → M5; M2 → M6; {M4, M5, M6} → M7.
+Dependencies: M0 → M1 → {M2, M3}; M3 → M4 → M5; M2 → M6; {M4, M5, M6} → M7; M7 → M8.
 Sizes are relative effort (S < M < L), not dates.
 
 | # | Delivery | Done when | Size | Brief |
@@ -45,6 +45,7 @@ Sizes are relative effort (S < M < L), not dates.
 | M5 | `plotter.py`: distributions, binned metric, ranking; fixed model styles; `stage=plot` | plots for the two n6 models; redraw without predictions | S | `tasks/M5.md` |
 | M6 | `perf.py`: model protocol, `offline` + `single`, timing rules, `quality_gate`; uses the M2 class | GPU job measures both models; repeats scatter < 5 %; failed gate → `invalid` | M | `tasks/M6.md` |
 | M7 | `ParetoPlot`, `pareto.csv` | EMD median vs latency p50 for AdamW vs Muon (n6), then n5–n8 | S | `tasks/M7.md` |
+| M8 | cluster steps as a Snakemake workflow: `workflow/Snakefile`, a profile per site, `predict` one job per model, `perf` one job, reruns of what changed only | local-profile workflow test green; a Raven run of two models: two parallel predict jobs, one perf job, then score and plot; a third model added to the run predicts alone | M | `tasks/M8.md` |
 
 M2 lives mostly in the hep4m_scimo repo (`/raven/u/jboth/scimo`); everything else here.
 

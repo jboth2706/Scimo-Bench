@@ -96,7 +96,7 @@ class Metric:
     """A statistic of one quantity, optionally in bins of `x` (explicit edges).
 
     `variable` and `x` name a comparison (`jet_e_response`) or an observable with its side
-    (`truth.jet_pt`, `reco.particle_pt`)."""
+    (`truth.jet_pt`, `reco.particle_pt`). `rank=False`: reported, but not in the rankings."""
 
     default_better: str | Mapping = "lower"
     location = False  # True: the value estimates the variable itself (its reference applies)
@@ -109,6 +109,7 @@ class Metric:
         x: str | None = None,
         binning: list[float] | None = None,
         label: str | None = None,
+        rank: bool = True,
     ):
         self.name = name
         self.variable = variable
@@ -116,6 +117,7 @@ class Metric:
         self.x = x
         self.binning = None if binning is None else [float(b) for b in binning]
         self.label = label or name
+        self.rank = rank
         if (x is None) != (binning is None):
             raise ValueError(f"metric '{name}': give both x and binning, or neither")
         if self.binning is not None and (
@@ -150,8 +152,9 @@ class Quantile(Metric):
         x: str | None = None,
         binning: list[float] | None = None,
         label: str | None = None,
+        rank: bool = True,
     ):
-        super().__init__(name, variable, better, x, binning, label)
+        super().__init__(name, variable, better, x, binning, label, rank)
         self.q = float(q)
 
     def stat(self, s, w):
@@ -409,7 +412,8 @@ def rank(
     primary: str | None = None,
     normalization: Mapping | None = None,
 ) -> pd.DataFrame:
-    """Rank models per metric (overall values) and by mean rank; missing/invalid last."""
+    """Rank models per metric (overall values; metrics with `rank`) and by mean rank;
+    missing/invalid last."""
     q = overall(report[report["kind"] == "quality"])
     models = list(dict.fromkeys(q["model"]))
     base = ref = None
@@ -420,7 +424,7 @@ def rank(
             base = ref = None
     records = []
     ranks: dict[str, list[float]] = {m: [] for m in models}
-    for metric in metrics:
+    for metric in (m for m in metrics if m.rank):
         rows = q[q["metric"] == metric.name].set_index("model").reindex(models)
         ok = (rows["status"] == OK).to_numpy()
         r = np.full(len(models), float(len(models)))

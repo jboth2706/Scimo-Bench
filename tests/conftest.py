@@ -9,8 +9,8 @@ from scimo_bench.io import REPO_ROOT
 from scimo_bench.jobs import ENV_ALLOW, ENV_JOB
 from tests import synthetic
 
-# the suite is small and runs where it is called, login nodes included (`pixi run test-job`
-# runs it as a job)
+# the suite is small and runs where it is called, login nodes included (`pixi run test-job
+# raven` runs it as a job)
 os.environ.setdefault(ENV_ALLOW, "1")
 
 JOB_VARS = (ENV_JOB, "SLURM_JOB_ID", ENV_ALLOW)
@@ -73,19 +73,3 @@ def synthetic_overrides(contract_dir, out_dir, models=("ident", "smear")):
     for n, m in zip(names, models, strict=True):
         ov.append(f"models.{n}.predictions={contract_dir / m}")
     return ov
-
-
-@pytest.fixture
-def fake_slurm(tmp_path):
-    """`sbatch` that records its arguments and prints a job id; `srun` that just runs."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "sbatch").write_text(
-        f'#!/bin/bash\necho "$@" >> {tmp_path / "sbatch.log"}\necho "12345;raven"\n'
-    )
-    (bin_dir / "srun").write_text('#!/bin/bash\nexec "$@"\n')
-    for f in bin_dir.iterdir():
-        f.chmod(0o755)
-    env = {k: v for k, v in os.environ.items() if k not in JOB_VARS}
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    return env

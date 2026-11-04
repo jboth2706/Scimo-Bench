@@ -45,4 +45,4 @@ def test_real_events_end_to_end(tmp_path):
     cf = pd.read_csv(out / "cutflow.csv")
     join = cf[cf.step == "join"].set_index("model")
     assert join.loc["truth", "events"] == 1000 and join.loc["dummy", "missing_events"] == 0
-    assert (out / "plots" / "response_vs_pt.pdf").exists()
+    assert (out / "plots" / "response_vs_e.pdf").exists()

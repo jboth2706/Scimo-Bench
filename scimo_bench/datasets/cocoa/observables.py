@@ -8,11 +8,12 @@ plotted (`plots.py`) or scored by a task metric as `truth.<name>` / `reco.<name>
 
 from __future__ import annotations
 
+import awkward as ak
 import numpy as np
 
 from scimo_bench.catalogue import observable
 from scimo_bench.datasets.cocoa.reader import CHARGED, NEUTRAL_HADRON, PHOTON
-from scimo_bench.datasets.common import counts, energy_sum, jet
+from scimo_bench.datasets.common import counts, delta_phi, energy_sum, f64, jet, jet_mass, ratio
 
 CH, NH, GAMMA = "charged hadrons", "neutral hadrons", "photons"
 
@@ -37,6 +38,11 @@ def jet_phi(ev):
 @observable(label="jet $E$", unit="GeV")
 def jet_e(ev):
     return energy_sum(ev.particles)
+
+
+@observable(label="jet mass", unit="GeV")
+def jet_m(ev):
+    return jet_mass(ev.particles)
 
 
 # --- particles -----------------------------------------------------------------------------
@@ -131,9 +137,46 @@ def photon_phi(ev):
     return of_class(ev.particles, PHOTON).phi
 
 
+# --- energy per class ----------------------------------------------------------------------
+
+
+@observable(label=f"$E$ ({CH})", unit="GeV")
+def e_charged(ev):
+    return energy_sum(of_class(ev.particles, CHARGED))
+
+
+@observable(label=f"$E$ ({NH})", unit="GeV")
+def e_neutral_hadrons(ev):
+    return energy_sum(of_class(ev.particles, NEUTRAL_HADRON))
+
+
+@observable(label=f"$E$ ({GAMMA})", unit="GeV")
+def e_photons(ev):
+    return energy_sum(of_class(ev.particles, PHOTON))
+
+
+@observable(label=r"charged energy fraction $E_{h^\pm} / E_\mathrm{jet}$")
+def charged_e_fraction(ev):
+    return ratio(e_charged(ev), jet_e(ev))
+
+
+@observable(label=r"neutral hadron energy fraction $E_{h^0} / E_\mathrm{jet}$")
+def neutral_hadron_e_fraction(ev):
+    return ratio(e_neutral_hadrons(ev), jet_e(ev))
+
+
 # --- tracks (an input: truth only) ---------------------------------------------------------
 
 
 @observable(label="tracks per event")
 def n_tracks(ev):
     return counts(ev.tracks.pt).astype(np.float64)
+
+
+@observable(label=r"track width ($p_T$-weighted $\Delta R$ to the jet axis)")
+def track_width(ev):
+    axis = jet(ev.particles)
+    tr = ev.tracks
+    pt = f64(tr.pt)
+    dr = np.hypot(f64(tr.eta) - axis["eta"], delta_phi(f64(tr.phi), axis["phi"]))
+    return ratio(ak.to_numpy(ak.sum(pt * dr, axis=1)), ak.to_numpy(ak.sum(pt, axis=1)))
