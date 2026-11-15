@@ -45,6 +45,13 @@ def test_several_models_in_order():
     assert c.models.dummy.model is None and c.models.dummy.label == "dummy"
 
 
+def test_mmflow_type():
+    c = cfg("task=pflow", "models=[flow]")
+    assert c.models.flow.family == "continuous" and c.models.flow.env == "default"
+    assert c.models.flow.model == "examples.mmflow_model:MMFlow"
+    assert c.models.flow.generation.sampler == "dpm" and c.models.flow.generation.steps == 50
+
+
 def test_models_file_by_name():
     from scimo_bench.configs import MODELS_DIR, models_file_path
 
