@@ -17,6 +17,8 @@ model_store = store(group="models")
 
 # passed to the model's `load`, echoed by its `info()`, hashed into `condition`
 ARGMAX = dict(mode="argmax", multiplicity="model", seed=0)
+# mm-flow: DPM-Solver with 50 steps for the flow and for its event head
+DPM50 = dict(sampler="dpm", steps=50, event_steps=50, multiplicity="model", seed=42)
 
 FIELDS = dict(
     label=None,  # name in plots; default: the model's name
@@ -44,6 +46,8 @@ TYPES = {
         generation=ARGMAX,
         env="perf",
     ),
+    # mm-flow joint flow-matching model: particles from tracks + topo clusters, or cells
+    "mmflow": dict(family="continuous", model="examples.mmflow_model:MMFlow", generation=DPM50),
 }
 
 

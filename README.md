@@ -184,7 +184,11 @@ score predictions made before without rerunning the model. A type gives defaults
 (only a prediction file), `nanohep` (protocol class `examples.nanohep_model:NanoHEP`: topo
 clusters and tracks as tokens) or `nanohep_cont` (`examples.nanohep_cont_model:NanoHEPCont`:
 topo clusters and tracks as continuous features, hep4m_scimo `pflow_cont/*`); both with argmax
-generation, env `perf`. `add_type(...)` adds one.
+generation, env `perf`. `mmflow` (`examples.mmflow_model:MMFlow`) runs a joint flow-matching
+checkpoint of [mm-flow](https://github.com/FM-for-HEP/mm-flow): the particles from tracks + topo
+clusters or from cells (`options.sources`), DPM-Solver with 50 steps; it needs torch and
+`mm_flow` importable (the models on the WIS cluster: `models/mmflow_wis.py`).
+`add_type(...)` adds one.
 
 ### The run folder
 
