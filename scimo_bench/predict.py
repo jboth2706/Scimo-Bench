@@ -110,7 +110,7 @@ def run_model(
             producer=model_cfg["model"],
             scimo_bench_commit=jobs.git_commit(),
         ),
-        hardware=perf.hardware(rt),
+        hardware=perf.hardware(rt, info),
         created=dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         extra=dict(load_s=load_s, model_s=model_s, wall_s=wall_s, batch_size=rt.batch_size),
     )

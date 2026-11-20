@@ -111,11 +111,12 @@ def timed(fn, device: str, *args):
     return out, time.perf_counter() - t0
 
 
-def hardware(rt: Runtime) -> dict:
-    """Hardware fingerprint for `meta` and perf conditions."""
+def hardware(rt: Runtime, info: dict | None = None) -> dict:
+    """Hardware fingerprint for `meta` and perf conditions. A model that fixes its own
+    precision (whatever `runtime.precision` says) reports it as `info()["precision"]`."""
     hw: dict[str, Any] = dict(
         device=rt.device,
-        precision=rt.precision,
+        precision=(info or {}).get("precision") or rt.precision,
         compiled=rt.compile,
         host=platform.node(),
         cpu=platform.processor() or platform.machine(),
@@ -295,6 +296,7 @@ def run_model(
         return rows, dict(hardware=hw, model=None)
 
     model, load_s, info = loaded or load_model(model_cfg, rt)
+    hw = hardware(rt, info)
     gen = condition_hash(dict(info.get("generation") or model_cfg.get("generation") or {}))
     first = model.inputs(events[: settings.batch_sizes[0]], settings.batch_sizes[0])
     _, compile_s = timed(model.generate, rt.device, first)
